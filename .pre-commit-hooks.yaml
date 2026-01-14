@@ -1,0 +1,6 @@
+- id: mdlint
+  name: mdlint
+  description: Lint Markdown files for style violations
+  entry: mdlint check
+  language: python
+  types: [markdown]

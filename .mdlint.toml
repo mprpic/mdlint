@@ -1,0 +1,8 @@
+exclude = ["docs/rules/md*.md", "tests/fixtures/"]
+
+[rules.MD013]
+line_length = 120
+code_blocks = false
+
+[rules.MD029]
+style = "ordered"

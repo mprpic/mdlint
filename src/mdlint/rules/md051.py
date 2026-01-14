@@ -1,0 +1,349 @@
+import re
+import unicodedata
+from dataclasses import dataclass, field
+from urllib.parse import unquote
+
+from mdlint.document import Document
+from mdlint.rules.base import Rule, RuleConfig
+from mdlint.violation import Violation
+
+
+@dataclass
+class MD051Config(RuleConfig):
+    """Configuration for MD051 rule."""
+
+    ignore_case: bool = field(
+        default=False,
+        metadata={
+            "description": "Ignore case when comparing fragments with headings.",
+        },
+    )
+    ignored_pattern: str = field(
+        default="",
+        metadata={
+            "description": "Regular expression pattern for fragments to ignore.",
+        },
+    )
+
+
+class MD051(Rule[MD051Config]):
+    """Link fragments should be valid."""
+
+    id = "MD051"
+    name = "link-fragments"
+    summary = "Link fragments should be valid"
+    config_class = MD051Config
+
+    description = (
+        "This rule checks that link fragments (internal links starting with `#`) "
+        "reference valid anchors in the document. Valid anchors include headings "
+        "(converted to fragments using when Markdown is displayed on GitHub), HTML elements with "
+        "`id` attributes, and `<a>` elements with `name` attributes."
+    )
+
+    rationale = (
+        "GitHub section links are created automatically for every heading when "
+        "Markdown content is displayed. However, section links break if headings "
+        "are renamed or removed. This rule helps identify broken section links "
+        "within a document before they cause problems for readers."
+    )
+
+    example_valid = """\
+# Heading One
+
+This [link](#heading-one) is valid.
+
+## Heading Two
+
+This [link](#heading-two) is also valid.
+
+A [link to top](#top) is always valid.
+
+<a id="custom-anchor"></a>
+
+This [link](#custom-anchor) references an HTML anchor.
+"""
+
+    example_invalid = """\
+# Heading One
+
+This [link](#non-existent) references a non-existent heading.
+
+## Heading Two
+
+Another [bad link](#missing-section) here.
+"""
+
+    # Pattern to match inline links: [text](destination)
+    INLINE_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+
+    # Pattern to match reference definitions: [ref]: destination
+    REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[([^\]]+)\]:\s*(.*)$")
+
+    # Pattern to match HTML id attribute
+    HTML_ID_PATTERN = re.compile(r'id\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+    # Pattern to match HTML name attribute (for <a> tags)
+    HTML_NAME_PATTERN = re.compile(r'name\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+    # Pattern to match opening HTML tags
+    HTML_TAG_PATTERN = re.compile(r"<\s*([a-zA-Z][a-zA-Z0-9]*)\s*([^>]*)>", re.IGNORECASE)
+
+    # Pattern to match custom anchor syntax {#anchor-name} in headings
+    CUSTOM_ANCHOR_PATTERN = re.compile(r"\{(#[a-z\d]+(?:[-_][a-z\d]+)*)\}")
+
+    # Pattern to match GitHub line fragment syntax
+    LINE_FRAGMENT_PATTERN = re.compile(r"^#(?:L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?|L\d+)$")
+
+    def check(self, document: Document, config: MD051Config) -> list[Violation]:
+        """Check for invalid link fragment violations."""
+        violations: list[Violation] = []
+
+        # Build set of line numbers inside code blocks
+        code_block_lines = self._get_code_block_lines(document)
+
+        # Build set of valid fragments
+        fragments = self._collect_fragments(document, code_block_lines)
+
+        # Build map of inline code span columns per line
+        code_span_positions = self._get_code_span_positions(document)
+
+        # Compile ignored pattern if provided
+        ignored_pattern_re = None
+        if config.ignored_pattern:
+            ignored_pattern_re = re.compile(config.ignored_pattern)
+
+        for line_num, line in enumerate(document.lines, start=1):
+            # Skip lines in code blocks
+            if line_num in code_block_lines:
+                continue
+
+            # Check inline links
+            for match in self.INLINE_LINK_PATTERN.finditer(line):
+                column = match.start() + 1
+
+                # Check if this match is inside an inline code span
+                if column in code_span_positions.get(line_num, set()):
+                    continue
+
+                destination = match.group(2).strip()
+                violation = self._check_fragment(
+                    destination, fragments, config, ignored_pattern_re, line_num, column, document
+                )
+                if violation:
+                    violations.append(violation)
+
+        # Check reference definitions
+        for line_num, line in enumerate(document.lines, start=1):
+            if line_num in code_block_lines:
+                continue
+            ref_match = self.REFERENCE_DEF_PATTERN.match(line)
+            if ref_match:
+                destination = ref_match.group(2).strip()
+                # Find where the destination starts
+                dest_start = line.find(destination)
+                column = dest_start + 1 if dest_start >= 0 else 1
+
+                violation = self._check_fragment(
+                    destination, fragments, config, ignored_pattern_re, line_num, column, document
+                )
+                if violation:
+                    violations.append(violation)
+
+        return violations
+
+    def _check_fragment(
+        self,
+        destination: str,
+        fragments: dict[str, int],
+        config: MD051Config,
+        ignored_pattern_re: re.Pattern | None,
+        line_num: int,
+        column: int,
+        document: Document,
+    ) -> Violation | None:
+        """Check if a link destination fragment is valid.
+
+        Returns a Violation if invalid, None otherwise.
+        """
+        # Skip if not a fragment link
+        if not destination.startswith("#") or len(destination) <= 1:
+            return None
+
+        # Skip GitHub line fragment syntax
+        if self.LINE_FRAGMENT_PATTERN.match(destination):
+            return None
+
+        fragment_text = destination[1:]  # Remove leading #
+
+        # Check if fragment matches ignored pattern
+        if ignored_pattern_re and ignored_pattern_re.search(fragment_text):
+            return None
+
+        # Decode URL-encoded fragment for comparison
+        decoded_fragment = unquote(fragment_text)
+        encoded_destination = "#" + self._encode_fragment(decoded_fragment)
+
+        # Check if fragment exists
+        if encoded_destination in fragments:
+            return None
+
+        # Check case-insensitive match
+        destination_lower = destination.lower()
+        matching_key = None
+        for key in fragments:
+            if destination_lower == key.lower():
+                matching_key = key
+                break
+
+        if matching_key:
+            if config.ignore_case:
+                return None
+            # Case mismatch - report with suggestion
+            return Violation(
+                line=line_num,
+                column=column,
+                rule_id=self.id,
+                rule_name=self.name,
+                message=f"Expected: {matching_key}; Actual: {destination}",
+                context=document.get_line(line_num),
+            )
+
+        # Fragment not found
+        return Violation(
+            line=line_num,
+            column=column,
+            rule_id=self.id,
+            rule_name=self.name,
+            message=f"Link fragment {destination} not found in document",
+            context=document.get_line(line_num),
+        )
+
+    def _collect_fragments(self, document: Document, code_block_lines: set[int]) -> dict[str, int]:
+        """Collect all valid fragments from the document.
+
+        Returns:
+            Dict mapping fragment strings (with #) to occurrence count.
+        """
+        fragments: dict[str, int] = {"#top": 0}
+
+        # Collect fragments from headings
+        tokens = document.tokens
+        for i, token in enumerate(tokens):
+            if token.type == "heading_open" and token.map:
+                # The inline token immediately follows heading_open
+                if i + 1 < len(tokens) and tokens[i + 1].type == "inline":
+                    heading_text = self._extract_heading_text(tokens[i + 1])
+                    if heading_text:
+                        fragment = self._heading_to_fragment(heading_text)
+                        if fragment != "#":
+                            count = fragments.get(fragment, 0)
+                            if count:
+                                fragments[f"{fragment}-{count}"] = 0
+                            fragments[fragment] = count + 1
+
+                        # Check for custom anchor syntax
+                        for match in self.CUSTOM_ANCHOR_PATTERN.finditer(heading_text):
+                            anchor = match.group(1)
+                            if anchor not in fragments:
+                                fragments[anchor] = 1
+
+        # Collect fragments from HTML anchors (skip code blocks)
+        for line_num, line in enumerate(document.lines, start=1):
+            if line_num in code_block_lines:
+                continue
+            for tag_match in self.HTML_TAG_PATTERN.finditer(line):
+                tag_name = tag_match.group(1).lower()
+                attrs = tag_match.group(2)
+
+                # Check for id attribute on any tag
+                id_match = self.HTML_ID_PATTERN.search(attrs)
+                if id_match:
+                    fragments[f"#{id_match.group(1)}"] = 0
+
+                # Check for name attribute on <a> tags
+                if tag_name == "a":
+                    name_match = self.HTML_NAME_PATTERN.search(attrs)
+                    if name_match:
+                        fragments[f"#{name_match.group(1)}"] = 0
+
+        return fragments
+
+    @staticmethod
+    def _extract_heading_text(inline_token) -> str:
+        """Extract text content from a heading's inline token.
+
+        Includes text and code_inline content. Excludes image alt text
+        to match the GitHub heading algorithm.
+        """
+        if not inline_token.children:
+            return ""
+
+        parts = []
+        for child in inline_token.children:
+            if child.type == "image":
+                continue
+            if child.type in ("text", "code_inline") and child.content:
+                parts.append(child.content)
+        return "".join(parts)
+
+    def _heading_to_fragment(self, heading_text: str) -> str:
+        """Convert heading text to a fragment using the GitHub algorithm.
+
+        The algorithm:
+        1. Convert to lowercase
+        2. Remove punctuation (keep letters, marks, numbers, connector punctuation)
+        3. Convert spaces to dashes
+        4. URL-encode the result
+
+        Args:
+            heading_text: The heading text.
+
+        Returns:
+            The fragment string with leading #.
+        """
+        # Remove custom anchor syntax from heading text
+        text = self.CUSTOM_ANCHOR_PATTERN.sub("", heading_text).strip()
+
+        # Convert to lowercase
+        text = text.lower()
+
+        # Remove characters that are not in allowed Unicode categories
+        # Allowed: Letter, Mark, Number, Connector_Punctuation, dash, space
+        result = []
+        for char in text:
+            category = unicodedata.category(char)
+            if category.startswith(("L", "M", "N")) or category == "Pc":
+                result.append(char)
+            elif char in "- ":
+                result.append(char)
+            # Other characters are removed
+
+        text = "".join(result)
+
+        # Convert spaces to dashes
+        text = text.replace(" ", "-")
+
+        return "#" + self._encode_fragment(text)
+
+    @staticmethod
+    def _encode_fragment(text: str) -> str:
+        """URL-encode a fragment, similar to encodeURIComponent.
+
+        Args:
+            text: The fragment text (without #).
+
+        Returns:
+            URL-encoded fragment.
+        """
+        # Characters that don't need encoding in fragments
+        safe_chars = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
+        result = []
+        for char in text:
+            if char.lower() in safe_chars:
+                result.append(char)
+            else:
+                # Encode the character
+                encoded = "".join(f"%{b:02X}" for b in char.encode("utf-8"))
+                result.append(encoded)
+        return "".join(result)

@@ -1,0 +1,7 @@
+# Test pyproject.toml configuration
+
+[tool.mdlint]
+select = ["MD001", "MD003", "MD004"]
+
+[tool.mdlint.rules.MD003]
+style = "consistent"

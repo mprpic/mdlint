@@ -1,0 +1,121 @@
+site_name: mdlint
+repo_url: https://github.com/mprpic/mdlint
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mprpic/mdlint
+
+theme:
+  name: material
+  language: en
+  favicon: assets/favicon.png
+  logo: assets/icon.svg
+  font:
+    text: Ubuntu
+    code: Ubuntu Mono
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  features:
+    - search.suggest
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.indexes
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - def_list
+  - tables
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+hooks:
+  - docs/hooks.py
+
+extra_css:
+  - stylesheets/extra.css
+
+docs_dir: docs
+
+watch:
+  - src/mdlint/rules
+
+nav:
+  - Overview: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Configuration: configuration.md
+  - Rules:
+      - rules/index.md
+      - rules/md001.md
+      - rules/md003.md
+      - rules/md004.md
+      - rules/md005.md
+      - rules/md007.md
+      - rules/md009.md
+      - rules/md010.md
+      - rules/md011.md
+      - rules/md012.md
+      - rules/md013.md
+      - rules/md014.md
+      - rules/md018.md
+      - rules/md019.md
+      - rules/md020.md
+      - rules/md021.md
+      - rules/md022.md
+      - rules/md023.md
+      - rules/md024.md
+      - rules/md025.md
+      - rules/md026.md
+      - rules/md027.md
+      - rules/md028.md
+      - rules/md029.md
+      - rules/md030.md
+      - rules/md031.md
+      - rules/md032.md
+      - rules/md033.md
+      - rules/md034.md
+      - rules/md035.md
+      - rules/md036.md
+      - rules/md037.md
+      - rules/md038.md
+      - rules/md039.md
+      - rules/md040.md
+      - rules/md041.md
+      - rules/md042.md
+      - rules/md043.md
+      - rules/md044.md
+      - rules/md045.md
+      - rules/md046.md
+      - rules/md047.md
+      - rules/md048.md
+      - rules/md049.md
+      - rules/md050.md
+      - rules/md051.md
+      - rules/md052.md
+      - rules/md053.md
+      - rules/md054.md
+      - rules/md055.md
+      - rules/md056.md
+      - rules/md058.md
+      - rules/md059.md
+      - rules/md060.md

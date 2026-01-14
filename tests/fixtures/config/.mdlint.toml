@@ -1,0 +1,9 @@
+# Test .mdlint.toml configuration
+
+ignore = ["MD041"]
+
+[rules.MD003]
+style = "atx"
+
+[rules.MD004]
+style = "dash"

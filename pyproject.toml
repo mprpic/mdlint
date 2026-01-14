@@ -1,0 +1,60 @@
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "mdlint"
+version = "0.1.0"
+description = "A Python Markdown linter"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Martin Prpič", email = "martin.prpic@gmail.com" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+keywords = ["markdown", "linter", "style", "lint"]
+dependencies = [
+    "markdown-it-py>=3.0.0",
+    "mdit-py-plugins>=0.4.0",
+    "rich-click>=1.8.0",
+    "rich>=13.0.0",
+    "ignore-python>=0.1.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+
+[project.scripts]
+mdlint = "mdlint.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/mprpic/mdlint"
+Repository = "https://github.com/mprpic/mdlint"
+
+[dependency-groups]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.8.0",
+    "ty>=0.0.1a11",
+    "tox>=4.0.0",
+]
+docs = [
+    "mkdocs-material>=9.0.0",
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "docs" }
+]
