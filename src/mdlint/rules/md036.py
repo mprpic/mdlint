@@ -70,10 +70,7 @@ More text here.
         """Check for emphasis used instead of a heading."""
         violations: list[Violation] = []
 
-        i = 0
-        while i < len(document.tokens):
-            token = document.tokens[i]
-
+        for i, token in enumerate(document.tokens):
             # Look for top-level paragraph_open tokens only; emphasis
             # inside list items, blockquotes, etc. can't be headings.
             if token.type == "paragraph_open" and token.map and token.level == 0:
@@ -82,7 +79,6 @@ More text here.
 
                 # Only check single-line paragraphs
                 if line_end - line_start > 1:
-                    i += 1
                     continue
 
                 # Get the inline token that follows paragraph_open
@@ -103,8 +99,6 @@ More text here.
                                     context=line_content,
                                 )
                             )
-
-            i += 1
 
         return violations
 

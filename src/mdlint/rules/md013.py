@@ -168,7 +168,7 @@ Another paragraph with a line that is also way too long and should be flagged by
         heading_lines: set[int] = set()
 
         for token in document.tokens:
-            if token.type in ("heading_open",) and token.map:
+            if token.type == "heading_open" and token.map:
                 start_line = token.map[0] + 1
                 end_line = token.map[1]
                 for line_num in range(start_line, end_line + 1):

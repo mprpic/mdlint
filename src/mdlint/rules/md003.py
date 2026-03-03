@@ -116,40 +116,22 @@ Mixed heading styles in the same document.
                     expected_style = current_style
                     continue
 
-                # Check style match
-                is_violation = False
+                # Determine the effective expected style for this heading level
+                if expected_style in ("setext_with_atx", "setext_with_atx_closed"):
+                    atx_variant = "atx" if expected_style == "setext_with_atx" else "atx_closed"
+                    effective_expected = "setext" if level <= 2 else atx_variant
+                else:
+                    effective_expected = expected_style
 
-                if expected_style == "setext_with_atx":
-                    # h1/h2 should be setext, h3+ should be atx
-                    if level <= 2 and current_style != "setext":
-                        is_violation = True
-                    elif level > 2 and current_style != "atx":
-                        is_violation = True
-                elif expected_style == "setext_with_atx_closed":
-                    # h1/h2 should be setext, h3+ should be atx_closed
-                    if level <= 2 and current_style != "setext":
-                        is_violation = True
-                    elif level > 2 and current_style != "atx_closed":
-                        is_violation = True
-                elif current_style != expected_style:
-                    is_violation = True
-
-                if is_violation:
+                if current_style != effective_expected:
                     context = document.get_line(line)
-                    # Use specific expected style in message for compound styles
-                    if expected_style == "setext_with_atx":
-                        display_expected = "setext" if level <= 2 else "atx"
-                    elif expected_style == "setext_with_atx_closed":
-                        display_expected = "setext" if level <= 2 else "atx_closed"
-                    else:
-                        display_expected = expected_style
                     violations.append(
                         Violation(
                             line=line,
                             column=1,
                             rule_id=self.id,
                             rule_name=self.name,
-                            message=f"Expected {display_expected}, found {current_style}",
+                            message=f"Expected {effective_expected}, found {current_style}",
                             context=context,
                         )
                     )

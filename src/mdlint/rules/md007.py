@@ -134,18 +134,8 @@ class MD007(Rule[MD007Config]):
                 # Calculate expected indentation based on nesting level
                 nesting_level = len(list_stack) - 1  # 0-indexed depth
 
-                if nesting_level == 0:
-                    # Top-level list
-                    if start_indented:
-                        expected_indent = start_indent
-                    else:
-                        expected_indent = 0
-                else:
-                    # Nested list
-                    if start_indented:
-                        expected_indent = start_indent + (nesting_level * indent)
-                    else:
-                        expected_indent = nesting_level * indent
+                base = start_indent if start_indented else 0
+                expected_indent = base + nesting_level * indent
 
                 if actual_indent != expected_indent:
                     violations.append(

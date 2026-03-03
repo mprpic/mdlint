@@ -175,24 +175,16 @@ class MD060(Rule[MD060Config]):
                     errors_compact.extend(compact_errs)
                     errors_tight.extend(tight_errs)
 
-        # Return errors for the style with fewest violations
+        # Return errors for the allowed style with fewest violations
+        candidates: list[list[Violation]] = []
         if style_aligned_allowed:
-            result = errors_aligned
-        else:
-            result = errors_compact if style_compact_allowed else errors_tight
+            candidates.append(errors_aligned)
+        if style_compact_allowed:
+            candidates.append(errors_compact)
+        if style_tight_allowed:
+            candidates.append(errors_tight)
 
-        if style_compact_allowed and (
-            len(errors_compact) < len(result) or not style_aligned_allowed
-        ):
-            result = errors_compact
-
-        if style_tight_allowed and (
-            len(errors_tight) < len(result)
-            or (not style_aligned_allowed and not style_compact_allowed)
-        ):
-            result = errors_tight
-
-        return result
+        return min(candidates, key=len) if candidates else []  # type: ignore[return-value]
 
     def _check_aligned_style(
         self,
