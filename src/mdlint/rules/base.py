@@ -67,6 +67,22 @@ class Rule(ABC, Generic[ConfigT]):
         return code_lines
 
     @staticmethod
+    def _get_html_block_lines(document: Document) -> set[int]:
+        """Get set of line numbers that are inside HTML blocks.
+
+        Returns:
+            Set of 1-indexed line numbers that are part of HTML blocks.
+        """
+        html_lines: set[int] = set()
+
+        for token in document.tokens:
+            if token.type == "html_block" and token.map:
+                for line_num in range(token.map[0] + 1, token.map[1] + 1):
+                    html_lines.add(line_num)
+
+        return html_lines
+
+    @staticmethod
     def _overlaps_ranges(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
         """Check if a position range overlaps with any existing ranges.
 

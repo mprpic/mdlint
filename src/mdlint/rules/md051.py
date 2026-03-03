@@ -77,9 +77,6 @@ Another [bad link](#missing-section) here.
     # Pattern to match inline links: [text](destination)
     INLINE_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 
-    # Pattern to match reference definitions: [ref]: destination
-    REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[([^\]]+)\]:\s*(.*)$")
-
     # Pattern to match HTML id attribute
     HTML_ID_PATTERN = re.compile(r'id\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
@@ -95,6 +92,9 @@ Another [bad link](#missing-section) here.
     # Pattern to match GitHub line fragment syntax
     LINE_FRAGMENT_PATTERN = re.compile(r"^#(?:L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?|L\d+)$")
 
+    # Characters that need URL-encoding in fragments
+    _UNSAFE_FRAGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]")
+
     def check(self, document: Document, config: MD051Config) -> list[Violation]:
         """Check for invalid link fragment violations."""
         violations: list[Violation] = []
@@ -102,8 +102,9 @@ Another [bad link](#missing-section) here.
         # Build set of line numbers inside code blocks
         code_block_lines = self._get_code_block_lines(document)
 
-        # Build set of valid fragments
+        # Build set of valid fragments and case-insensitive lookup
         fragments = self._collect_fragments(document, code_block_lines)
+        fragments_lower: dict[str, str] = {k.lower(): k for k in fragments}
 
         # Build map of inline code span columns per line
         code_span_positions = self._get_code_span_positions(document)
@@ -128,15 +129,19 @@ Another [bad link](#missing-section) here.
 
                 destination = match.group(2).strip()
                 violation = self._check_fragment(
-                    destination, fragments, config, ignored_pattern_re, line_num, column, document
+                    destination,
+                    fragments,
+                    fragments_lower,
+                    config,
+                    ignored_pattern_re,
+                    line_num,
+                    column,
+                    document,
                 )
                 if violation:
                     violations.append(violation)
 
-        # Check reference definitions
-        for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
-                continue
+            # Check reference definitions
             ref_match = self.REFERENCE_DEF_PATTERN.match(line)
             if ref_match:
                 destination = ref_match.group(2).strip()
@@ -145,7 +150,14 @@ Another [bad link](#missing-section) here.
                 column = dest_start + 1 if dest_start >= 0 else 1
 
                 violation = self._check_fragment(
-                    destination, fragments, config, ignored_pattern_re, line_num, column, document
+                    destination,
+                    fragments,
+                    fragments_lower,
+                    config,
+                    ignored_pattern_re,
+                    line_num,
+                    column,
+                    document,
                 )
                 if violation:
                     violations.append(violation)
@@ -156,6 +168,7 @@ Another [bad link](#missing-section) here.
         self,
         destination: str,
         fragments: dict[str, int],
+        fragments_lower: dict[str, str],
         config: MD051Config,
         ignored_pattern_re: re.Pattern | None,
         line_num: int,
@@ -188,13 +201,8 @@ Another [bad link](#missing-section) here.
         if encoded_destination in fragments:
             return None
 
-        # Check case-insensitive match
-        destination_lower = destination.lower()
-        matching_key = None
-        for key in fragments:
-            if destination_lower == key.lower():
-                matching_key = key
-                break
+        # Check case-insensitive match using pre-built lookup
+        matching_key = fragments_lower.get(destination.lower())
 
         if matching_key:
             if config.ignore_case:
@@ -326,8 +334,8 @@ Another [bad link](#missing-section) here.
 
         return "#" + self._encode_fragment(text)
 
-    @staticmethod
-    def _encode_fragment(text: str) -> str:
+    @classmethod
+    def _encode_fragment(cls, text: str) -> str:
         """URL-encode a fragment, similar to encodeURIComponent.
 
         Args:
@@ -336,14 +344,6 @@ Another [bad link](#missing-section) here.
         Returns:
             URL-encoded fragment.
         """
-        # Characters that don't need encoding in fragments
-        safe_chars = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
-        result = []
-        for char in text:
-            if char.lower() in safe_chars:
-                result.append(char)
-            else:
-                # Encode the character
-                encoded = "".join(f"%{b:02X}" for b in char.encode("utf-8"))
-                result.append(encoded)
-        return "".join(result)
+        return cls._UNSAFE_FRAGMENT_RE.sub(
+            lambda m: "".join(f"%{b:02X}" for b in m.group().encode("utf-8")), text
+        )

@@ -91,11 +91,7 @@ Here is a [used link][example].
         violations: list[Violation] = []
 
         # Get lines that are inside code blocks or HTML blocks
-        excluded_lines = self._get_code_block_lines(document)
-        for token in document.tokens:
-            if token.type == "html_block" and token.map:
-                for line_num in range(token.map[0] + 1, token.map[1] + 1):
-                    excluded_lines.add(line_num)
+        excluded_lines = self._get_code_block_lines(document) | self._get_html_block_lines(document)
 
         # Get inline code span positions per line
         code_span_positions = self._get_code_span_positions(document)
@@ -103,8 +99,9 @@ Here is a [used link][example].
         # Build set of ignored labels (lowercase for case-insensitive matching)
         ignored = {label.lower() for label in config.ignored_definitions}
 
-        # Parse all reference definitions
+        # Parse all reference definitions and collect all referenced labels in a single pass
         definitions: dict[str, list[int]] = {}  # label -> list of line numbers
+        references: set[str] = set()
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in excluded_lines:
                 continue
@@ -112,26 +109,15 @@ Here is a [used link][example].
             match = self.REFERENCE_DEF_PATTERN.match(line)
             if match:
                 label = match.group(1).lower()
-                if label not in definitions:
-                    definitions[label] = []
-                definitions[label].append(line_num)
-
-        # Collect all referenced labels
-        references: set[str] = set()
-        for line_num, line in enumerate(document.lines, start=1):
-            if line_num in excluded_lines:
+                definitions.setdefault(label, []).append(line_num)
                 continue
 
-            # Skip reference definition lines for reference collection
-            if self.REFERENCE_DEF_PATTERN.match(line):
-                continue
-
+            # Collect reference usages from non-definition lines
             line_code_cols = code_span_positions.get(line_num, set())
-
             for pattern in self.REFERENCE_USE_PATTERNS:
-                for match in pattern.finditer(line):
-                    if match.start() + 1 not in line_code_cols:
-                        references.add(match.group(1).lower())
+                for ref_match in pattern.finditer(line):
+                    if ref_match.start() + 1 not in line_code_cols:
+                        references.add(ref_match.group(1).lower())
 
         # Check for unused definitions
         for label, line_nums in definitions.items():

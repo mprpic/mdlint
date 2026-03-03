@@ -93,87 +93,45 @@ This is an image: ![alt text][no-image]
         ignored = {label.lower() for label in config.ignored_labels}
 
         # Get lines in code blocks and HTML blocks to skip
-        skip_lines = self._get_code_block_lines(document)
-        for token in document.tokens:
-            if token.type == "html_block" and token.map:
-                for line_num in range(token.map[0] + 1, token.map[1] + 1):
-                    skip_lines.add(line_num)
+        skip_lines = self._get_code_block_lines(document) | self._get_html_block_lines(document)
 
         # Get inline code span columns per line
         code_span_positions = self._get_code_span_positions(document)
+
+        # Patterns to check: (pattern, extra_filter)
+        patterns: list[tuple[re.Pattern, bool]] = [
+            (self.FULL_REF_PATTERN, False),
+            (self.COLLAPSED_REF_PATTERN, False),
+        ]
+        if config.shortcut_syntax:
+            patterns.append((self.SHORTCUT_REF_PATTERN, True))
 
         # Check each line for undefined references
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in skip_lines:
                 continue
 
-            # Check full references: [text][label]
-            for match in self.FULL_REF_PATTERN.finditer(line):
-                label = match.group(1).lower()
-                column = match.start() + 1
-
-                if column in code_span_positions.get(line_num, set()):
-                    continue
-
-                if label not in defined_labels and label not in ignored:
-                    label_name = match.group(1)
-                    msg = f'Missing link or image reference definition: "{label_name}"'
-                    violations.append(
-                        Violation(
-                            line=line_num,
-                            column=column,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=msg,
-                            context=document.get_line(line_num),
-                        )
-                    )
-
-            # Check collapsed references: [label][]
-            for match in self.COLLAPSED_REF_PATTERN.finditer(line):
-                label = match.group(1).lower()
-                column = match.start() + 1
-
-                if column in code_span_positions.get(line_num, set()):
-                    continue
-
-                if label not in defined_labels and label not in ignored:
-                    label_name = match.group(1)
-                    msg = f'Missing link or image reference definition: "{label_name}"'
-                    violations.append(
-                        Violation(
-                            line=line_num,
-                            column=column,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=msg,
-                            context=document.get_line(line_num),
-                        )
-                    )
-
-            # Check shortcut references if enabled: [label]
-            if config.shortcut_syntax:
-                for match in self.SHORTCUT_REF_PATTERN.finditer(line):
-                    label = match.group(1).lower()
+            for pattern, check_collapsed in patterns:
+                for match in pattern.finditer(line):
                     column = match.start() + 1
 
                     if column in code_span_positions.get(line_num, set()):
                         continue
 
-                    # Skip if already matched as collapsed reference
-                    if self._is_collapsed_reference(line, match.start()):
+                    # For shortcut refs, skip if already matched as collapsed reference
+                    if check_collapsed and self._is_collapsed_reference(line, match.start()):
                         continue
 
+                    label = match.group(1).lower()
                     if label not in defined_labels and label not in ignored:
                         label_name = match.group(1)
-                        msg = f'Missing link or image reference definition: "{label_name}"'
                         violations.append(
                             Violation(
                                 line=line_num,
                                 column=column,
                                 rule_id=self.id,
                                 rule_name=self.name,
-                                message=msg,
+                                message=f'Missing link/image reference definition: "{label_name}"',
                                 context=document.get_line(line_num),
                             )
                         )

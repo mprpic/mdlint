@@ -212,23 +212,29 @@ Reference links [like this][ref] are also used.
                         )
                     )
 
-            # Check full reference links/images: [text][ref]
-            if not config.full:
-                for match in self.FULL_REFERENCE_PATTERN.finditer(line):
+            # Check reference-style links/images (full, collapsed, shortcut)
+            # Each entry: (allowed, pattern, ref_id_group, style_name)
+            ref_checks: list[tuple[bool, re.Pattern, int, str]] = [
+                (config.full, self.FULL_REFERENCE_PATTERN, 3, "Full reference"),
+                (config.collapsed, self.COLLAPSED_REFERENCE_PATTERN, 2, "Collapsed reference"),
+                (config.shortcut, self.SHORTCUT_REFERENCE_PATTERN, 2, "Shortcut reference"),
+            ]
+            for allowed, pattern, ref_group, style_name in ref_checks:
+                if allowed:
+                    continue
+                for match in pattern.finditer(line):
                     column = match.start() + 1
 
-                    # Check if inside inline code
                     if column in code_span_positions.get(line_num, set()):
                         continue
 
-                    # Check if already processed
                     if self._overlaps_ranges(match.start(), match.end(), processed_ranges):
                         continue
 
                     processed_ranges.append((match.start(), match.end()))
 
                     is_image = match.group(1) == "!"
-                    ref_id = match.group(3).lower()
+                    ref_id = match.group(ref_group).lower()
 
                     # Only report if reference definition exists
                     if ref_id in reference_definitions:
@@ -239,71 +245,7 @@ Reference links [like this][ref] are also used.
                                 column=column,
                                 rule_id=self.id,
                                 rule_name=self.name,
-                                message=f"Full reference {link_type} style not allowed",
-                                context=document.get_line(line_num),
-                            )
-                        )
-
-            # Check collapsed reference links/images: [ref][]
-            if not config.collapsed:
-                for match in self.COLLAPSED_REFERENCE_PATTERN.finditer(line):
-                    column = match.start() + 1
-
-                    # Check if inside inline code
-                    if column in code_span_positions.get(line_num, set()):
-                        continue
-
-                    # Check if already processed
-                    if self._overlaps_ranges(match.start(), match.end(), processed_ranges):
-                        continue
-
-                    processed_ranges.append((match.start(), match.end()))
-
-                    is_image = match.group(1) == "!"
-                    ref_id = match.group(2).lower()
-
-                    # Only report if reference definition exists
-                    if ref_id in reference_definitions:
-                        link_type = "image" if is_image else "link"
-                        violations.append(
-                            Violation(
-                                line=line_num,
-                                column=column,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message=f"Collapsed reference {link_type} style not allowed",
-                                context=document.get_line(line_num),
-                            )
-                        )
-
-            # Check shortcut reference links/images: [ref]
-            if not config.shortcut:
-                for match in self.SHORTCUT_REFERENCE_PATTERN.finditer(line):
-                    column = match.start() + 1
-
-                    # Check if inside inline code
-                    if column in code_span_positions.get(line_num, set()):
-                        continue
-
-                    # Check if already processed
-                    if self._overlaps_ranges(match.start(), match.end(), processed_ranges):
-                        continue
-
-                    processed_ranges.append((match.start(), match.end()))
-
-                    is_image = match.group(1) == "!"
-                    ref_id = match.group(2).lower()
-
-                    # Only report if reference definition exists
-                    if ref_id in reference_definitions:
-                        link_type = "image" if is_image else "link"
-                        violations.append(
-                            Violation(
-                                line=line_num,
-                                column=column,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message=f"Shortcut reference {link_type} style not allowed",
+                                message=f"{style_name} {link_type} style not allowed",
                                 context=document.get_line(line_num),
                             )
                         )
