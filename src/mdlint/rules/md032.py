@@ -62,6 +62,11 @@ Some text here.
     def check(self, document: Document, config: MD032Config) -> list[Violation]:
         """Check for blanks-around-lists violations."""
         violations: list[Violation] = []
+
+        # Collect top-level list ranges (start, end) as 1-indexed lines.
+        # markdown-it-py splits lists with mixed markers into separate
+        # tokens; merge consecutive ranges so they are treated as one list.
+        list_ranges: list[tuple[int, int]] = []
         nesting = 0
 
         for token in document.tokens:
@@ -70,46 +75,53 @@ Some text here.
                     list_start = token.map[0] + 1  # 1-indexed
                     list_end = token.map[1]  # 1-indexed last line
 
-                    # Check blank line above
-                    if list_start > 1:
-                        line_above = document.get_line(list_start - 1)
-                        if line_above is not None and line_above.strip() != "":
-                            violations.append(
-                                Violation(
-                                    line=list_start,
-                                    column=1,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message="Expected blank line above list",
-                                    context=document.get_line(list_start),
-                                )
-                            )
-
-                    # Check blank line below
-                    # List token maps may include a trailing blank line in
-                    # their range; if the last mapped line is already blank,
-                    # no violation is possible.
-                    last_line = document.get_line(list_end)
-                    if (
-                        last_line is not None
-                        and last_line.strip() != ""
-                        and list_end < len(document.lines)
-                    ):
-                        line_below = document.get_line(list_end + 1)
-                        if line_below is not None and line_below.strip() != "":
-                            violations.append(
-                                Violation(
-                                    line=list_end,
-                                    column=1,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message="Expected blank line below list",
-                                    context=last_line,
-                                )
-                            )
+                    # Merge with previous range if they are adjacent
+                    if list_ranges:
+                        prev_start, prev_end = list_ranges[-1]
+                        if prev_end + 1 >= list_start:
+                            list_ranges[-1] = (prev_start, max(prev_end, list_end))
+                        else:
+                            list_ranges.append((list_start, list_end))
+                    else:
+                        list_ranges.append((list_start, list_end))
 
                 nesting += 1
             elif token.type in ("bullet_list_close", "ordered_list_close"):
                 nesting -= 1
+
+        for list_start, list_end in list_ranges:
+            # Check blank line above
+            if list_start > 1:
+                line_above = document.get_line(list_start - 1)
+                if line_above is not None and line_above.strip() != "":
+                    violations.append(
+                        Violation(
+                            line=list_start,
+                            column=1,
+                            rule_id=self.id,
+                            rule_name=self.name,
+                            message="Expected blank line above list",
+                            context=document.get_line(list_start),
+                        )
+                    )
+
+            # Check blank line below
+            # List token maps may include a trailing blank line in
+            # their range; if the last mapped line is already blank,
+            # no violation is possible.
+            last_line = document.get_line(list_end)
+            if last_line is not None and last_line.strip() != "" and list_end < len(document.lines):
+                line_below = document.get_line(list_end + 1)
+                if line_below is not None and line_below.strip() != "":
+                    violations.append(
+                        Violation(
+                            line=list_end,
+                            column=1,
+                            rule_id=self.id,
+                            rule_name=self.name,
+                            message="Expected blank line below list",
+                            context=last_line,
+                        )
+                    )
 
         return violations

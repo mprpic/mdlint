@@ -109,6 +109,28 @@ class TestMD032:
         assert violations[0].line == 4
         assert "below" in violations[0].message.lower()
 
+    def test_mixed_markers_no_blanks_around_violations(
+        self, rule: MD032, config: MD032Config
+    ) -> None:
+        """Mixed-marker list parsed as consecutive lists should not trigger."""
+        content = load_fixture("md032", "valid_mixed_markers.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_mixed_markers_missing_blank_above(self, rule: MD032, config: MD032Config) -> None:
+        """Mixed-marker list without blank line above triggers one violation."""
+        content = load_fixture("md032", "invalid_mixed_markers.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 1
+        assert violations[0].line == 2
+        assert "above" in violations[0].message.lower()
+
     def test_list_in_code_block_no_violations(self, rule: MD032, config: MD032Config) -> None:
         """List-like content inside fenced code block should not trigger."""
         content = "Text.\n\n```\nSome text.\n* Item 1\n* Item 2\nMore text.\n```\n\nText.\n"
