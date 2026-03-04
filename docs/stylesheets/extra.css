@@ -10,8 +10,8 @@ html {
 /* Solarized color palette (except for top header) */
 :root > * {
     --md-primary-fg-color: #2aa198; /* cyan */
-    --md-primary-fg-color--light: #2aa198; /* cyan */
-    --md-primary-fg-color--dark: #2aa198; /* cyan */
+    --md-primary-fg-color--light: #35bdb3; /* cyan - lighter tint for hover */
+    --md-primary-fg-color--dark: #1e8c83; /* cyan - darker shade for active */
 }
 
 [data-md-color-scheme="default"] {
@@ -26,10 +26,13 @@ html {
 }
 
 [data-md-color-scheme="default"] .md-typeset pre {
-    background-color: #eee8d5; /* base2 */
     border: 1px solid #93a1a1; /* base1 */
     border-radius: 5px;
-    overflow: hidden;
+    overflow: hidden; /* clips to border-radius */
+}
+
+[data-md-color-scheme="default"] .md-typeset pre > code {
+    overflow-x: auto;
 }
 
 [data-md-color-scheme="default"] .md-typeset h1,
@@ -52,6 +55,21 @@ html {
     color: #b58900; /* yellow */
 }
 
+[data-md-color-scheme="slate"] .md-typeset code,
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+    background-color: #0a4050;
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre {
+    border: 1px solid #586e75; /* base01 */
+    border-radius: 5px;
+    overflow: hidden; /* clips to border-radius */
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+    overflow-x: auto;
+}
+
 /* Active navigation item in sidebar */
 .md-nav__link--active {
     color: var(--md-accent-fg-color) !important;
@@ -69,13 +87,10 @@ html {
 }
 
 .md-header {
-    /*background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);*/
-    /*background: linear-gradient(90deg, #1CB5E0 0%, #000851 100%);*/
     background: linear-gradient(90deg, #FDBB2D 0%, #3A1C71 100%);
 }
 
 /* Playground */
-
 #playground-status {
     display: flex;
     align-items: center;
