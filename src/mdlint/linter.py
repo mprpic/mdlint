@@ -2,8 +2,6 @@ import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ignore import WalkBuilder
-
 from mdlint.document import Document
 from mdlint.rules import RULE_REGISTRY
 from mdlint.rules.base import Rule, RuleConfig
@@ -89,6 +87,8 @@ def discover_files(
     Returns:
         List of Markdown file paths.
     """
+    from ignore import WalkBuilder  # noqa: PLC0415
+
     files: list[Path] = []
 
     walker = WalkBuilder(paths[0])

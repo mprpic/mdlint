@@ -1,4 +1,4 @@
-exclude = ["docs/rules/md*.md", "tests/fixtures/"]
+exclude = ["docs/rules/md*.md", "tests/fixtures/", "docs/playground.md"]
 
 [rules.MD013]
 line_length = 120

@@ -2,7 +2,9 @@ import dataclasses
 import importlib
 import re
 import sys
+import zipfile
 from dataclasses import fields
+from pathlib import Path
 from typing import Literal, get_args, get_origin
 
 from mdlint.rules import RULE_REGISTRY
@@ -142,3 +144,18 @@ def on_page_markdown(markdown: str, page, config, files) -> str:  # noqa: ARG001
     if page.file.src_path == "rules/index.md":
         return markdown + "\n\n" + _build_rules_index_table()
     return markdown
+
+
+def on_post_build(config) -> None:
+    """Build mdlint source archive for the browser playground."""
+    site_dir = Path(config["site_dir"])
+    assets_dir = site_dir / "assets"
+    assets_dir.mkdir(exist_ok=True)
+
+    src_dir = Path("src/mdlint")
+    zip_path = assets_dir / "mdlint-src.zip"
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for py_file in sorted(src_dir.rglob("*.py")):
+            arcname = str(py_file.relative_to("src"))
+            zf.write(py_file, arcname)

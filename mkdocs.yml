@@ -38,10 +38,17 @@ theme:
 
 markdown_extensions:
   - admonition
+  - attr_list
   - def_list
+  - md_in_html
   - tables
   - pymdownx.highlight
   - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
   - toc:
       permalink: true
 
@@ -54,6 +61,9 @@ hooks:
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - assets/playground.js
+
 docs_dir: docs
 
 watch:
@@ -64,6 +74,7 @@ nav:
   - Installation: installation.md
   - Usage: usage.md
   - Configuration: configuration.md
+  - Playground: playground.md
   - Rules:
       - rules/index.md
       - rules/md001.md

@@ -2,6 +2,11 @@ html {
     overscroll-behavior: none;
 }
 
+.md-typeset {
+    /* Because we're using Ubuntu fonts, which tend to look bigger, reduce the main body font size accordingly. */
+    font-size: 0.7rem;
+}
+
 /* Solarized color palette (except for top header) */
 :root > * {
     --md-primary-fg-color: #2aa198; /* cyan */
@@ -60,4 +65,125 @@ html {
     /*background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);*/
     /*background: linear-gradient(90deg, #1CB5E0 0%, #000851 100%);*/
     background: linear-gradient(90deg, #FDBB2D 0%, #3A1C71 100%);
+}
+
+/* Playground */
+
+#playground-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-radius: 5px;
+    font-size: 0.7rem;
+}
+
+#playground-status.error span {
+    color: #dc322f;
+}
+
+.playground-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #93a1a1;
+    border-top-color: #2aa198;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+#playground-status.error .playground-spinner {
+    display: none;
+}
+
+#playground-editor .tabbed-block > p {
+    margin: 0;
+}
+
+#playground-editor .tabbed-content {
+    margin-top: 0.5rem;
+}
+
+.playground-textarea {
+    width: 100%;
+    min-height: 300px;
+    padding: 0.75rem;
+    font-family: "Ubuntu Mono", monospace;
+    font-size: 0.6rem;
+    line-height: 1.5;
+    border: 1px solid #93a1a1;
+    border-radius: 5px;
+    resize: vertical;
+    box-sizing: border-box;
+    tab-size: 4;
+    outline: none;
+}
+
+[data-md-color-scheme="default"] .playground-textarea {
+    background-color: #eee8d5;
+    color: #657b83;
+}
+
+[data-md-color-scheme="slate"] .playground-textarea {
+    background-color: #073642;
+    color: #839496;
+}
+
+#playground-controls {
+    margin: 0.75rem 0;
+}
+
+#lint-btn {
+    padding: 0.5rem 2rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #fff;
+    background-color: #2aa198;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+#lint-btn:hover {
+    background-color: #268bd2;
+}
+
+#lint-output:empty {
+    display: none;
+}
+
+.playground-output {
+    padding: 0.75rem;
+    font-family: "Ubuntu Mono", monospace;
+    font-size: 0.6rem;
+    line-height: 1.6;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+[data-md-color-scheme="default"] .playground-output {
+    background-color: #eee8d5;
+    border: 1px solid #93a1a1;
+    color: #657b83;
+}
+
+[data-md-color-scheme="slate"] .playground-output {
+    background-color: #073642;
+    border: 1px solid #586e75;
+    color: #839496;
+}
+
+.playground-output.success {
+    color: #859900;
+}
+
+.playground-output.violations {
+    color: #dc322f;
 }
