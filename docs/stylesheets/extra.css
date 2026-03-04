@@ -61,6 +61,13 @@ html {
     padding-bottom: 4rem;
 }
 
+@media screen and (max-width: 44.984375em) {
+    .md-content__inner > .highlight {
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+
 .md-header {
     /*background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);*/
     /*background: linear-gradient(90deg, #1CB5E0 0%, #000851 100%);*/
