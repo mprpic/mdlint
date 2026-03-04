@@ -126,12 +126,12 @@ html {
 
 [data-md-color-scheme="default"] .playground-textarea {
     background-color: #eee8d5;
-    color: #657b83;
+    color: #073642;
 }
 
 [data-md-color-scheme="slate"] .playground-textarea {
     background-color: #073642;
-    color: #839496;
+    color: #eee8d5;
 }
 
 #playground-controls {
@@ -143,7 +143,7 @@ html {
     font-size: 0.7rem;
     font-weight: 600;
     color: #fff;
-    background-color: #2aa198;
+    background-color: #6c71c4;
     border: none;
     border-radius: 5px;
     cursor: pointer;
@@ -151,7 +151,15 @@ html {
 }
 
 #lint-btn:hover {
-    background-color: #268bd2;
+    background-color: #3A1C71;
+}
+
+[data-md-color-scheme="slate"] #lint-btn {
+    background-color: #b58900;
+}
+
+[data-md-color-scheme="slate"] #lint-btn:hover {
+    background-color: #cb4b16;
 }
 
 #lint-output:empty {
