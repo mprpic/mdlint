@@ -8,6 +8,7 @@ A Python Markdown linter that checks files for style and formatting violations.
 - **Gitignore-aware** file discovery that respects `.gitignore` patterns
 - **stdin support** for integration with editors and CI pipelines
 - **Built-in rule documentation** accessible from the CLI
+- **[Online playground](https://mdlint.dev/playground/)** to try mdlint directly in the browser — no installation needed
 - **Compatible** with existing `markdownlint` rule sets (Ruby and JavaScript implementations)
 
 ## Installation
