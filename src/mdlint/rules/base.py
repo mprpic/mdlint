@@ -36,6 +36,10 @@ class Rule(ABC, Generic[ConfigT]):
     # Pattern to match reference definitions: [ref]: destination
     REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[([^\]]+)\]:\s*(.*)$")
 
+    @property
+    def fixable(self) -> bool:
+        return type(self).fix is not Rule.fix
+
     @abstractmethod
     def check(self, document: Document, config: ConfigT) -> list[Violation]:
         """Check document for violations.
@@ -47,6 +51,13 @@ class Rule(ABC, Generic[ConfigT]):
         Returns:
             List of violations found.
         """
+
+    def fix(self, document: Document, config: ConfigT) -> str | None:  # noqa: ARG002
+        """Fix violations in the document. Override in fixable rules.
+
+        Returns fixed content string, or None if nothing was fixed.
+        """
+        return None
 
     @staticmethod
     def _get_code_block_lines(document: Document) -> set[int]:

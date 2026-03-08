@@ -24,6 +24,7 @@ class FileResult:
     violations: list[Violation] = field(default_factory=list)
     error: str | None = None
     content: str | None = None
+    was_fixed: bool = False
 
 
 @dataclass
@@ -50,6 +51,11 @@ class LintResult:
     def files_with_errors(self) -> int:
         """Files that couldn't be processed."""
         return sum(1 for f in self.files if f.error)
+
+    @property
+    def files_fixed(self) -> int:
+        """Files where fixes were applied."""
+        return sum(1 for f in self.files if f.was_fixed)
 
     @property
     def total_violations(self) -> int:
@@ -205,6 +211,81 @@ class Linter:
             FileResult with violations.
         """
         return self.lint_file(Path("<stdin>"), content=content)
+
+    def fix_file(self, path: Path, content: str | None = None) -> FileResult:
+        """Fix and lint a single file.
+
+        Applies fixable rules sequentially, writes back if changed, then lints
+        the (possibly fixed) content.
+
+        Args:
+            path: File path.
+            content: Optional content (if already read, e.g., stdin).
+
+        Returns:
+            FileResult with remaining violations and was_fixed flag.
+        """
+        try:
+            if content is None:
+                content = path.read_text(encoding="utf-8")
+
+            was_fixed = False
+            for rule, config in self._rules:
+                if not rule.fixable:
+                    continue
+                document = Document(path, content)
+                fixed = rule.fix(document, config)
+                if fixed is not None:
+                    content = fixed
+                    was_fixed = True
+
+            if was_fixed and path != Path("<stdin>"):
+                path.write_text(content, encoding="utf-8")
+
+            result = self.lint_file(path, content=content)
+            result.was_fixed = was_fixed
+            return result
+
+        except OSError as e:
+            return FileResult(path=path, error=str(e))
+
+    def fix_stdin(self, content: str) -> tuple[FileResult, str]:
+        """Fix content from stdin.
+
+        Args:
+            content: Content read from stdin.
+
+        Returns:
+            Tuple of (FileResult with remaining violations, fixed content).
+        """
+        result = self.fix_file(Path("<stdin>"), content=content)
+        return result, result.content or content
+
+    def fix_paths(
+        self,
+        paths: list[Path],
+        respect_gitignore: bool = True,
+        exclude_patterns: list[str] | None = None,
+    ) -> LintResult:
+        """Fix and lint multiple files or directories.
+
+        Args:
+            paths: List of file or directory paths.
+            respect_gitignore: Whether to respect .gitignore patterns.
+            exclude_patterns: Glob patterns to exclude files/directories.
+
+        Returns:
+            Aggregated LintResult.
+        """
+        files = discover_files(
+            paths, respect_gitignore=respect_gitignore, exclude_patterns=exclude_patterns
+        )
+        results: list[FileResult] = []
+
+        for file_path in files:
+            results.append(self.fix_file(file_path))
+
+        return LintResult(files=results)
 
     def lint_paths(
         self,

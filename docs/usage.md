@@ -123,6 +123,34 @@ mdlint check --verbose
 mdlint check --show-files
 ```
 
+## Auto-fixing violations
+
+Use `--fix` to automatically correct fixable violations:
+
+```bash
+# Fix violations in files in-place
+mdlint check --fix docs/
+
+# Fix a single file
+mdlint check --fix README.md
+
+# Fix stdin and output the result to stdout
+cat README.md | mdlint check --fix -
+```
+
+Not all rules support auto-fixing. When `--fix` is used:
+
+- Fixable rules are applied sequentially to each file
+- Files are modified in-place with the corrected content
+- Any remaining unfixable violations are still reported in the output
+- The [rules index](rules/index.md) shows which rules are fixable with a checkmark in the "Fixable" column
+
+When used with stdin (`-`), the fixed content is written to stdout. This is useful for editor integrations that pipe
+content through external formatters.
+
+The exit code behavior is unchanged: exit code `1` if any violations remain after fixing, `0` if all violations were
+fixed or there were none.
+
 ## Viewing rule documentation
 
 List all available rules:

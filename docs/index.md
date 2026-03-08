@@ -14,6 +14,7 @@ Markdown in your code base or documentation project.
 - **Configurable** via `.mdlint.toml` or `pyproject.toml` with per-rule customization
 - **Multiple output formats** including human-readable terminal output and JSON
 - **Gitignore-aware** file discovery that respects `.gitignore`/`.ignore` patterns
+- **Auto-fix support** via `--fix` to automatically correct fixable violations
 - **stdin support** for integration with editors and or use in CI pipelines
 - **Built-in rule documentation** accessible from the CLI, with valid/invalid examples
 - **[Online playground](playground.md)** to try mdlint directly in the browser — no installation needed

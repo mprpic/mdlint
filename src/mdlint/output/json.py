@@ -36,6 +36,7 @@ def format_json(result: LintResult) -> str:
             "files_checked": result.files_checked,
             "files_with_violations": result.files_with_violations,
             "files_with_errors": result.files_with_errors,
+            "files_fixed": result.files_fixed,
             "total_violations": result.total_violations,
             "exit_code": result.exit_code,
         },

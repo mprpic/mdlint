@@ -6,6 +6,7 @@ A Python Markdown linter that checks files for style and formatting violations.
 - **Configurable** via `.mdlint.toml` or `pyproject.toml` with per-rule settings
 - **Multiple output formats** including human-readable terminal output and JSON
 - **Gitignore-aware** file discovery that respects `.gitignore` patterns
+- **Auto-fix support** via `--fix` to automatically correct fixable violations
 - **stdin support** for integration with editors and CI pipelines
 - **Built-in rule documentation** accessible from the CLI
 - **[Online playground](https://mdlint.dev/playground/)** to try mdlint directly in the browser — no installation needed
@@ -50,6 +51,20 @@ mdlint check docs/
 # JSON output
 mdlint check --format json docs/
 ```
+
+### Auto-fix violations
+
+```bash
+# Fix violations in-place
+mdlint check --fix docs/
+
+# Fix stdin and output result to stdout
+cat README.md | mdlint check --fix -
+```
+
+Not all rules support auto-fixing. When `--fix` is used, fixable violations are corrected automatically and any
+remaining unfixable violations are still reported. The rules index in the documentation indicates which rules are
+fixable.
 
 ### View rule documentation
 
@@ -185,7 +200,7 @@ mdlint check --verbose
 ## Future improvements
 
 - Parallel processing of files (if many are being checked)
-- A `--fix` option to auto-fix some violations
+- More rules with auto-fix support
 
 ## License
 

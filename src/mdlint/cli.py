@@ -51,7 +51,7 @@ def cli() -> None:
                 },
                 {
                     "name": "Output options",
-                    "options": ["--format", "--verbose", "--show-files", "--show-context"],
+                    "options": ["--format", "--fix", "--verbose", "--show-files", "--show-context"],
                 },
             ],
         },
@@ -134,6 +134,12 @@ def cli() -> None:
     default=False,
     help="Show surrounding lines for each violation.",
 )
+@click.option(
+    "--fix",
+    is_flag=True,
+    default=False,
+    help="Auto-fix violations where possible.",
+)
 def check(
     paths: tuple[str, ...],
     output_format: str,
@@ -148,6 +154,7 @@ def check(
     verbose: bool,
     show_files: bool,
     show_context: bool,
+    fix: bool,
 ) -> None:
     """Lint Markdown files for style violations.
 
@@ -186,6 +193,10 @@ def check(
     # Handle stdin
     if len(paths) == 1 and paths[0] == "-":
         content = sys.stdin.read()
+        if fix:
+            file_result, fixed_content = linter.fix_stdin(content)
+            click.echo(fixed_content, nl=False)
+            sys.exit(1 if file_result.violations else 0)
         file_result = linter.lint_stdin(content)
         result = LintResult(files=[file_result])
     else:
@@ -219,9 +230,14 @@ def check(
         if verbose:
             click.secho(f"Scanning {len(path_list)} path(s)...", dim=True, err=True)
 
-        result = linter.lint_paths(
-            path_list, respect_gitignore=not no_ignore, exclude_patterns=exclude_list
-        )
+        if fix:
+            result = linter.fix_paths(
+                path_list, respect_gitignore=not no_ignore, exclude_patterns=exclude_list
+            )
+        else:
+            result = linter.lint_paths(
+                path_list, respect_gitignore=not no_ignore, exclude_patterns=exclude_list
+            )
 
         if verbose:
             click.secho(f"Found {result.files_checked} file(s)", dim=True, err=True)

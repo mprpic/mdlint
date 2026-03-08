@@ -100,7 +100,18 @@ def print_results(
 
     # Summary line
     checked = _pluralize(result.files_checked, "file")
-    if result.total_violations > 0 or result.files_with_errors > 0:
+    if result.files_fixed > 0:
+        fixed = _pluralize(result.files_fixed, "file")
+        if result.total_violations > 0 or result.files_with_errors > 0:
+            violations = _pluralize(result.total_violations, "violation")
+            files = _pluralize(result.files_with_violations, "file")
+            console.print(
+                f"[green]✓[/green] Fixed {fixed}. "
+                f"{violations} remaining in {files} ({checked} checked)"
+            )
+        else:
+            console.print(f"[green]✓[/green] Fixed {fixed}. All files valid ({checked} checked)")
+    elif result.total_violations > 0 or result.files_with_errors > 0:
         violations = _pluralize(result.total_violations, "violation")
         files = _pluralize(result.files_with_violations, "file")
         console.print(f"[red]✘[/red] Found {violations} in {files} ({checked} checked)")
