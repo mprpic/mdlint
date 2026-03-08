@@ -7,22 +7,25 @@ hide:
 
 `mdlint` requires Python 3.10 or later.
 
-## Using uv
+<!-- mdlint: disable MD046 -->
+=== "uv"
 
-Install as a [uv tool](https://docs.astral.sh/uv/guides/tools/):
+    Install as a [uv tool](https://docs.astral.sh/uv/guides/tools/):
 
-```bash
-uv tool install --from git+https://github.com/mprpic/mdlint mdlint
-```
+    ```bash
+    uv tool install --from git+https://github.com/mprpic/mdlint mdlint
+    ```
 
-Or run directly in a temporary environment without installing:
+    Or run directly in a temporary environment without installing:
 
-```bash
-uvx --from git+https://github.com/mprpic/mdlint mdlint check README.md
-```
+    ```bash
+    uvx --from git+https://github.com/mprpic/mdlint mdlint check README.md
+    ```
 
-## Using pip
+=== "pip"
 
-```bash
-pip install --user git+https://github.com/mprpic/mdlint
-```
+    Install directly from GitHub:
+
+    ```bash
+    pip install --user git+https://github.com/mprpic/mdlint
+    ```
