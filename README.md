@@ -10,6 +10,7 @@ A Python Markdown linter that checks files for style and formatting violations.
 - **stdin support** for integration with editors and CI pipelines
 - **Built-in rule documentation** accessible from the CLI
 - **[Online playground](https://mdlint.dev/playground/)** to try mdlint directly in the browser — no installation needed
+- **Parallel processing** of files automatically when checking large projects
 - **Compatible** with existing `markdownlint` rule sets (Ruby and JavaScript implementations)
 
 ## Installation
@@ -196,11 +197,6 @@ mdlint check --verbose
 | 0    | No violations found                                   |
 | 1    | Violations found                                      |
 | 2    | Error occurred (file not found, invalid config, etc.) |
-
-## Future improvements
-
-- Parallel processing of files (if many are being checked)
-- More rules with auto-fix support
 
 ## License
 

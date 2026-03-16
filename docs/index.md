@@ -18,6 +18,7 @@ Markdown in your code base or documentation project.
 - **stdin support** for integration with editors and or use in CI pipelines
 - **Built-in rule documentation** accessible from the CLI, with valid/invalid examples
 - **[Online playground](playground.md)** to try mdlint directly in the browser — no installation needed
+- **Parallel processing** of files automatically when checking large projects
 - **Compatible** (mostly) with existing `markdownlint` rule sets (Ruby and JavaScript implementations)
 
 ## Quick start
