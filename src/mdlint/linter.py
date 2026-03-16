@@ -1,5 +1,8 @@
 import fnmatch
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from mdlint.document import Document
@@ -141,6 +144,18 @@ def discover_files(
         files = filtered
 
     return sorted(set(files))
+
+
+def _process_file_worker(
+    path: Path,
+    rule_configs: dict[str, RuleConfig],
+    enabled_rules: set[str],
+    *,
+    fix: bool,
+) -> FileResult:
+    """Worker function for parallel file processing. Must be top-level for pickling."""
+    linter = Linter(rule_configs=rule_configs, enabled_rules=enabled_rules)
+    return linter.fix_file(path) if fix else linter.lint_file(path)
 
 
 class Linter:
@@ -316,12 +331,7 @@ class Linter:
         files = discover_files(
             paths, respect_gitignore=respect_gitignore, exclude_patterns=exclude_patterns
         )
-        results: list[FileResult] = []
-
-        for file_path in files:
-            results.append(self.fix_file(file_path))
-
-        return LintResult(files=results)
+        return self._process_files(files, fix=True)
 
     def lint_paths(
         self,
@@ -342,9 +352,24 @@ class Linter:
         files = discover_files(
             paths, respect_gitignore=respect_gitignore, exclude_patterns=exclude_patterns
         )
-        results: list[FileResult] = []
+        return self._process_files(files, fix=False)
 
-        for file_path in files:
-            results.append(self.lint_file(file_path))
+    _PARALLEL_THRESHOLD = 64
 
+    def _process_files(self, files: list[Path], *, fix: bool) -> LintResult:
+        process_fn = self.fix_file if fix else self.lint_file
+        workers = min(os.cpu_count() or 1, len(files))
+
+        if workers < 2 or len(files) < self._PARALLEL_THRESHOLD:
+            return LintResult(files=[process_fn(f) for f in files])
+
+        enabled_rules = set(rule.id for rule, _ in self._rules)
+        worker = partial(
+            _process_file_worker,
+            rule_configs=self.rule_configs,
+            enabled_rules=enabled_rules,
+            fix=fix,
+        )
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(worker, files))
         return LintResult(files=results)
