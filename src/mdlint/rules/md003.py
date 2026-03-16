@@ -137,3 +137,87 @@ Mixed heading styles in the same document.
                     )
 
         return violations
+
+    def fix(self, document: Document, config: MD003Config) -> str | None:
+        """Fix heading style violations by converting headings to the expected style."""
+        style = config.style
+        expected_style: str | None = None if style == "consistent" else style
+
+        # Collect heading info: (line_0indexed, level, current_style)
+        headings: list[tuple[int, int, str]] = []
+        for token in document.tokens:
+            if token.type == "heading_open":
+                level = int(token.tag[1])
+                line_0 = token.map[0] if token.map else 0
+                raw_line = document.get_line(line_0 + 1)
+                current_style = self._get_heading_style(token.markup, raw_line)
+                headings.append((line_0, level, current_style))
+
+        if not headings:
+            return None
+
+        # For consistent mode, determine expected from first heading
+        if expected_style is None:
+            expected_style = headings[0][2]
+
+        # Determine which headings need fixing
+        # (line_0idx, level, current_style, effective_expected)
+        fixes: list[tuple[int, int, str, str]] = []
+        for line_0, level, current_style in headings:
+            if expected_style in ("setext_with_atx", "setext_with_atx_closed"):
+                atx_variant = "atx" if expected_style == "setext_with_atx" else "atx_closed"
+                effective_expected = "setext" if level <= 2 else atx_variant
+            else:
+                effective_expected = expected_style
+
+            if current_style != effective_expected:
+                # Skip impossible conversions: can't convert h3+ to setext
+                if effective_expected == "setext" and level > 2:
+                    continue
+                fixes.append((line_0, level, current_style, effective_expected))
+
+        if not fixes:
+            return None
+
+        lines = document.content.split("\n")
+
+        # Process fixes in reverse order to preserve line indices
+        for line_0, level, current, target in reversed(fixes):
+            raw_line = lines[line_0]
+
+            if current == "setext":
+                # Heading text is on this line, underline is next line
+                heading_text = raw_line
+                underline_idx = line_0 + 1
+
+                if target == "atx":
+                    lines[line_0] = "#" * level + " " + heading_text
+                    if underline_idx < len(lines):
+                        lines.pop(underline_idx)
+                elif target == "atx_closed":
+                    lines[line_0] = "#" * level + " " + heading_text + " " + "#" * level
+                    if underline_idx < len(lines):
+                        lines.pop(underline_idx)
+
+            elif current == "atx":
+                heading_text = re.sub(r"^#{1,6}\s+", "", raw_line)
+
+                if target == "setext":
+                    underline_char = "=" if level == 1 else "-"
+                    lines[line_0] = heading_text
+                    lines.insert(line_0 + 1, underline_char * len(heading_text))
+                elif target == "atx_closed":
+                    lines[line_0] = "#" * level + " " + heading_text + " " + "#" * level
+
+            elif current == "atx_closed":
+                heading_text = re.sub(r"^#{1,6}\s+", "", raw_line)
+                heading_text = re.sub(r"\s+#{1,6}\s*$", "", heading_text)
+
+                if target == "setext":
+                    underline_char = "=" if level == 1 else "-"
+                    lines[line_0] = heading_text
+                    lines.insert(line_0 + 1, underline_char * len(heading_text))
+                elif target == "atx":
+                    lines[line_0] = "#" * level + " " + heading_text
+
+        return "\n".join(lines)

@@ -139,3 +139,77 @@ class TestMD032:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD032Fix:
+    @pytest.fixture
+    def rule(self) -> MD032:
+        return MD032()
+
+    @pytest.fixture
+    def config(self) -> MD032Config:
+        return MD032Config()
+
+    def test_fix_corrects_invalid(self, rule: MD032, config: MD032Config) -> None:
+        """Fix inserts blank lines around lists."""
+        content = load_fixture("md032", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD032, config: MD032Config) -> None:
+        """Valid document returns None (nothing to fix)."""
+        content = load_fixture("md032", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_missing_blank_above(self, rule: MD032, config: MD032Config) -> None:
+        """Fix inserts blank line above list."""
+        content = "Some text.\n* Item 1\n* Item 2\n\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Some text.\n\n* Item 1\n* Item 2\n\nMore text.\n"
+
+    def test_fix_missing_blank_below(self, rule: MD032, config: MD032Config) -> None:
+        """Fix inserts blank line below list."""
+        content = "Text.\n\n* Item 1\n* Item 2\n---\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Text.\n\n* Item 1\n* Item 2\n\n---\n"
+
+    def test_fix_list_at_start(self, rule: MD032, config: MD032Config) -> None:
+        """List at start of document doesn't get blank line added above."""
+        content = "* Item 1\n* Item 2\n\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_list_at_end(self, rule: MD032, config: MD032Config) -> None:
+        """List at end of document doesn't get blank line added below."""
+        content = "Some text.\n\n* Item 1\n* Item 2\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_mixed_markers(self, rule: MD032, config: MD032Config) -> None:
+        """Fix handles mixed-marker lists correctly."""
+        content = load_fixture("md032", "invalid_mixed_markers.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_lists_missing_blanks(self, rule: MD032, config: MD032Config) -> None:
+        """Fix inserts blank lines for multiple lists."""
+        content = "Text.\n* A\n* B\n\n1. One\n2. Two\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from mdlint.document import Document
@@ -52,15 +53,16 @@ Here is [link with trailing space ](https://example.org/page) in a sentence.
 And [ spaces on both sides ](https://example.net/) is also wrong.
 """
 
-    def check(self, document: Document, config: MD039Config) -> list[Violation]:
-        """Check for spaces inside link text."""
-        violations: list[Violation] = []
+    def _find_spaced_links(self, document: Document) -> Iterator[tuple[int, int, str, bool, bool]]:
+        """Find links with leading/trailing spaces in link text.
 
+        Yields tuples of (line_num, column, raw_text, has_leading, has_trailing)
+        for each link with spacing issues.
+        """
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            # Build source text for this inline token to find positions
             source_lines: list[tuple[int, str]] = []
             for ln in range(token.map[0] + 1, token.map[1] + 1):
                 source_lines.append((ln, document.get_line(ln) or ""))
@@ -98,7 +100,6 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                             raw_parts.append(child.content)
                         i += 1
 
-                    # Find this link's position in source
                     raw_text = "".join(raw_parts)
                     target = "[" + raw_text + "]"
                     idx = source.find(target, search_offset)
@@ -119,35 +120,65 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                             last_text is not None
                             and last_text.content != last_text.content.rstrip()
                         )
-                        context = document.get_line(line_num)
 
-                        if has_leading:
-                            violations.append(
-                                Violation(
-                                    line=line_num,
-                                    column=column,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message="Link text has leading space(s)",
-                                    context=context,
-                                )
-                            )
-
-                        if has_trailing:
-                            violations.append(
-                                Violation(
-                                    line=line_num,
-                                    column=column,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message="Link text has trailing space(s)",
-                                    context=context,
-                                )
-                            )
+                        if has_leading or has_trailing:
+                            yield line_num, column, raw_text, has_leading, has_trailing
 
                 i += 1
 
+    def check(self, document: Document, config: MD039Config) -> list[Violation]:
+        """Check for spaces inside link text."""
+        violations: list[Violation] = []
+
+        for line_num, column, _, has_leading, has_trailing in self._find_spaced_links(document):
+            context = document.get_line(line_num)
+
+            if has_leading:
+                violations.append(
+                    Violation(
+                        line=line_num,
+                        column=column,
+                        rule_id=self.id,
+                        rule_name=self.name,
+                        message="Link text has leading space(s)",
+                        context=context,
+                    )
+                )
+
+            if has_trailing:
+                violations.append(
+                    Violation(
+                        line=line_num,
+                        column=column,
+                        rule_id=self.id,
+                        rule_name=self.name,
+                        message="Link text has trailing space(s)",
+                        context=context,
+                    )
+                )
+
         return violations
+
+    def fix(self, document: Document, config: MD039Config) -> str | None:
+        """Fix spaces inside link text by stripping leading/trailing spaces."""
+        replacements: dict[int, list[tuple[str, str]]] = {}
+
+        for line_num, _, raw_text, _, _ in self._find_spaced_links(document):
+            target = "[" + raw_text + "]"
+            new_target = "[" + raw_text.strip() + "]"
+            replacements.setdefault(line_num, []).append((target, new_target))
+
+        if not replacements:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, line_replacements in replacements.items():
+            line = lines[line_num - 1]
+            for old, new in line_replacements:
+                line = line.replace(old, new, 1)
+            lines[line_num - 1] = line
+
+        return "\n".join(lines)
 
     @staticmethod
     def _source_idx_to_position(idx: int, source_lines: list[tuple[int, str]]) -> tuple[int, int]:

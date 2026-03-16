@@ -291,3 +291,75 @@ Some text:
 
         assert len(violations) == 1
         assert "user+tag@example.com" in violations[0].message
+
+    def test_fix_corrects_invalid(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps bare URLs and emails in angle brackets."""
+        content = load_fixture("md034", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD034, config: MD034Config) -> None:
+        """Fix returns None when there are no bare URLs."""
+        content = load_fixture("md034", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_bare_url(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps a bare URL in angle brackets."""
+        content = "Visit https://example.com/ for more info."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Visit <https://example.com/> for more info."
+
+    def test_fix_bare_email(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps a bare email in angle brackets."""
+        content = "Contact user@example.com for help."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Contact <user@example.com> for help."
+
+    def test_fix_multiple_bare_urls(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps multiple bare URLs on the same line."""
+        content = "Check https://one.com/ and https://two.com/ for info."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Check <https://one.com/> and <https://two.com/> for info."
+
+    def test_fix_url_with_trailing_punctuation(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps URL and preserves trailing punctuation outside brackets."""
+        content = "Visit https://example.com."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Visit <https://example.com>."
+
+    def test_fix_preserves_code_blocks(self, rule: MD034, config: MD034Config) -> None:
+        """Fix does not modify URLs inside code blocks."""
+        content = "```\nhttps://example.com/\n```\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_inline_code(self, rule: MD034, config: MD034Config) -> None:
+        """Fix does not modify URLs inside inline code."""
+        content = "Use `https://example.com/` in your config."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_link_syntax(self, rule: MD034, config: MD034Config) -> None:
+        """Fix does not modify URLs in markdown link syntax."""
+        content = "Visit [example](https://example.com/) for more info."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_url_between_html_tags(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps bare URL between HTML tags."""
+        content = "<b>https://example.com</b>"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "<b><https://example.com></b>"

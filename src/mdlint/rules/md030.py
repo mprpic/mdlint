@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from mdlint.document import Document
@@ -84,15 +85,12 @@ class MD030(Rule[MD030Config]):
     UL_PATTERN = re.compile(r"^(\s*)([*+-])(\s+)")
     OL_PATTERN = re.compile(r"^(\s*)(\d+\.)(\s+)")
 
-    def check(self, document: Document, config: MD030Config) -> list[Violation]:
-        """Check for list marker spacing violations."""
-        violations: list[Violation] = []
-
-        # Track list context: stack of (list_type, is_multi_paragraph)
+    def _iter_violating_items(
+        self, document: Document, config: MD030Config
+    ) -> Iterator[tuple[int, str, int, re.Pattern, re.Match, int]]:
+        """Yield violating items as (line_num, line_content, expected, pattern, match, end)."""
         list_stack: list[tuple[str, bool]] = []
-
-        # First pass: identify which lists have multi-paragraph items
-        list_info: dict[int, bool] = {}  # token index -> is_multi_paragraph
+        list_info: dict[int, bool] = {}
         self._analyze_lists(document.tokens, list_info)
 
         for token_index, token in enumerate(document.tokens):
@@ -111,12 +109,12 @@ class MD030(Rule[MD030Config]):
 
                 list_type, is_multi = list_stack[-1]
                 line_num = token.map[0] + 1
+                item_end_line = token.map[1]
                 line_content = document.get_line(line_num)
 
                 if line_content is None:
                     continue
 
-                # Determine expected spaces based on list type and multi-paragraph
                 if list_type == "ul":
                     expected_spaces = config.ul_multi if is_multi else config.ul_single
                     pattern = self.UL_PATTERN
@@ -125,27 +123,66 @@ class MD030(Rule[MD030Config]):
                     pattern = self.OL_PATTERN
 
                 match = pattern.match(line_content)
-                if match:
-                    actual_spaces = len(match.group(3))
-                    if actual_spaces != expected_spaces:
-                        # Calculate column (after marker)
-                        marker_end = match.end(2)
-                        violations.append(
-                            Violation(
-                                line=line_num,
-                                column=marker_end + 1,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message=(
-                                    f"Expected {expected_spaces} "
-                                    f"space{'s' if expected_spaces != 1 else ''} "
-                                    f"after list marker, found {actual_spaces}"
-                                ),
-                                context=line_content,
-                            )
-                        )
+                if match and len(match.group(3)) != expected_spaces:
+                    yield line_num, line_content, expected_spaces, pattern, match, item_end_line
+
+    def check(self, document: Document, config: MD030Config) -> list[Violation]:
+        """Check for list marker spacing violations."""
+        violations: list[Violation] = []
+
+        for line_num, line_content, expected_spaces, _, match, _end in self._iter_violating_items(
+            document, config
+        ):
+            actual_spaces = len(match.group(3))
+            marker_end = match.end(2)
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=marker_end + 1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=(
+                        f"Expected {expected_spaces} "
+                        f"space{'s' if expected_spaces != 1 else ''} "
+                        f"after list marker, found {actual_spaces}"
+                    ),
+                    context=line_content,
+                )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD030Config) -> str | None:
+        """Fix list marker spacing by adjusting spaces after markers."""
+        items_to_fix = list(self._iter_violating_items(document, config))
+        if not items_to_fix:
+            return None
+
+        lines = list(document.lines)
+        for line_num, _, expected_spaces, pattern, _match, item_end_line in items_to_fix:
+            line = lines[line_num - 1]
+            match = pattern.match(line)
+            if not match:
+                continue
+            actual_spaces = len(match.group(3))
+            delta = expected_spaces - actual_spaces
+            indent = match.group(1)
+            marker = match.group(2)
+            lines[line_num - 1] = indent + marker + " " * expected_spaces + line[match.end(3) :]
+
+            # Adjust indentation of continuation lines within this list item
+            if delta != 0:
+                for i in range(line_num, item_end_line):
+                    cont_line = lines[i]
+                    if not cont_line.strip():
+                        continue
+                    if delta > 0:
+                        lines[i] = " " * delta + cont_line
+                    else:
+                        remove = min(-delta, len(cont_line) - len(cont_line.lstrip()))
+                        lines[i] = cont_line[remove:]
+
+        return "\n".join(lines)
 
     @staticmethod
     def _analyze_lists(tokens: list, list_info: dict[int, bool]) -> None:

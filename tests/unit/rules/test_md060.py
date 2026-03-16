@@ -244,3 +244,174 @@ class TestMD060:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD060Fix:
+    @pytest.fixture
+    def rule(self) -> MD060:
+        return MD060()
+
+    @pytest.fixture
+    def config(self) -> MD060Config:
+        return MD060Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD060, config: MD060Config) -> None:
+        """Fix returns None for already-valid content."""
+        content = load_fixture("md060", "valid.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_for_no_table(self, rule: MD060, config: MD060Config) -> None:
+        """Fix returns None when no tables exist."""
+        content = load_fixture("md060", "no_table.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_for_valid_compact(self, rule: MD060) -> None:
+        """Fix returns None for valid compact table."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "compact.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_for_valid_tight(self, rule: MD060) -> None:
+        """Fix returns None for valid tight table."""
+        config = MD060Config(style="tight")
+        content = load_fixture("md060", "tight.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_for_valid_aligned(self, rule: MD060) -> None:
+        """Fix returns None for valid aligned table."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "aligned.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_invalid_any_style(self, rule: MD060, config: MD060Config) -> None:
+        """Fix corrects invalid table with 'any' style (picks compact)."""
+        content = load_fixture("md060", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_compact_to_aligned(self, rule: MD060) -> None:
+        """Fix reformats compact table to aligned style."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "compact.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_tight_to_compact(self, rule: MD060) -> None:
+        """Fix reformats tight table to compact style."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "tight.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_compact_to_tight(self, rule: MD060) -> None:
+        """Fix reformats compact table to tight style."""
+        config = MD060Config(style="tight")
+        content = load_fixture("md060", "compact.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_misaligned_to_aligned(self, rule: MD060) -> None:
+        """Fix corrects misaligned table to aligned style."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "misaligned.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_compact_with_aligned_delimiter(self, rule: MD060) -> None:
+        """Fix aligns delimiter row with header for aligned_delimiter option."""
+        config = MD060Config(style="compact", aligned_delimiter=True)
+        content = load_fixture("md060", "compact.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid_aligned_delimiter(self, rule: MD060) -> None:
+        """Fix returns None when aligned_delimiter is already satisfied."""
+        config = MD060Config(style="compact", aligned_delimiter=True)
+        content = load_fixture("md060", "aligned_delimiter.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_preserves_escaped_pipes(self, rule: MD060) -> None:
+        """Fix preserves escaped pipes within cells."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "escaped_pipe.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_preserves_empty_cells(self, rule: MD060) -> None:
+        """Fix preserves empty cells correctly."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "empty_cells.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_multiple_tables(self, rule: MD060) -> None:
+        """Fix returns None for valid multiple tables."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "multiple_tables.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_cjk_aligned(self, rule: MD060) -> None:
+        """Fix returns None for valid CJK aligned table."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "cjk_aligned.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_cjk_to_aligned(self, rule: MD060) -> None:
+        """Fix reformats CJK compact table to aligned style."""
+        config = MD060Config(style="aligned")
+        content = """\
+# CJK Table
+
+| 名前 | 意味 |
+| --- | --- |
+| はい | Yes |
+| いいえ | No |
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_no_leading_pipe_compact(self, rule: MD060) -> None:
+        """Fix returns None for valid table without leading pipes."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "no_leading_pipe.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_no_leading_pipe_to_tight(self, rule: MD060) -> None:
+        """Fix reformats table without leading pipes to tight style."""
+        config = MD060Config(style="tight")
+        content = load_fixture("md060", "no_leading_pipe.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

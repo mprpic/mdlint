@@ -54,45 +54,48 @@ class MD009(Rule[MD009Config]):
         "across different editors and version control systems."
     )
 
-    def check(self, document: Document, config: MD009Config) -> list[Violation]:
-        """Check for trailing spaces violations."""
-        violations: list[Violation] = []
+    @staticmethod
+    def _is_valid_hard_break(br_spaces: int, trailing_count: int, stripped: str) -> bool:
+        """Check if trailing spaces represent a valid hard line break."""
+        return (
+            br_spaces >= 2
+            and trailing_count == br_spaces
+            and len(stripped) > 0
+            and not stripped[-1].isspace()
+        )
 
+    def _get_violating_lines(
+        self, document: Document, config: MD009Config
+    ) -> list[tuple[int, str, int]]:
+        """Return list of (line_num, stripped_line, trailing_count) for violating lines."""
         br_spaces = config.br_spaces
 
-        # Build set of line numbers inside code blocks if configured to skip them
         code_block_lines: set[int] = set()
         if not config.code_blocks:
-            code_block_lines = self._get_code_block_lines(document)
+            code_block_lines = document.code_block_lines
 
+        results: list[tuple[int, str, int]] = []
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in code_block_lines:
                 continue
 
-            # Calculate trailing whitespace count
             stripped = line.rstrip()
             trailing_count = len(line) - len(stripped)
 
             if trailing_count == 0:
                 continue
 
-            # Check if this is an allowed hard break
-            # Hard break requires: br_spaces >= 2, exactly br_spaces trailing spaces,
-            # and a non-whitespace character before the trailing spaces
-            is_valid_hard_break = (
-                br_spaces >= 2
-                and trailing_count == br_spaces
-                and len(stripped) > 0
-                and not stripped[-1].isspace()
-            )
+            if not self._is_valid_hard_break(br_spaces, trailing_count, stripped):
+                results.append((line_num, stripped, trailing_count))
 
-            if is_valid_hard_break:
-                continue
+        return results
 
-            # This is a violation
-            # Column points to first trailing whitespace (1-indexed)
+    def check(self, document: Document, config: MD009Config) -> list[Violation]:
+        """Check for trailing spaces violations."""
+        violations: list[Violation] = []
+
+        for line_num, stripped, trailing_count in self._get_violating_lines(document, config):
             column = len(stripped) + 1
-
             violations.append(
                 Violation(
                     line=line_num,
@@ -103,8 +106,20 @@ class MD009(Rule[MD009Config]):
                         f"Trailing whitespace found "
                         f"({trailing_count} character{'s' if trailing_count != 1 else ''})"
                     ),
-                    context=line,
+                    context=document.get_line(line_num),
                 )
             )
 
         return violations
+
+    def fix(self, document: Document, config: MD009Config) -> str | None:
+        """Fix trailing spaces by removing them."""
+        violating_lines = self._get_violating_lines(document, config)
+        if not violating_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, stripped, _ in violating_lines:
+            lines[line_num - 1] = stripped
+
+        return "\n".join(lines)

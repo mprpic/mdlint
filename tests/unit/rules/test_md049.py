@@ -173,3 +173,116 @@ class TestMD049:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD049Fix:
+    @pytest.fixture
+    def rule(self) -> MD049:
+        return MD049()
+
+    @pytest.fixture
+    def config(self) -> MD049Config:
+        return MD049Config()
+
+    def test_fix_consistent_converts_to_first_style(self, rule: MD049, config: MD049Config) -> None:
+        """Fix in consistent mode converts all emphasis to match the first marker."""
+        content = load_fixture("md049", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # First marker is *, so underscores should become asterisks
+        assert "*italic*" in result.split("\n")[4]
+
+    def test_fix_returns_none_for_valid(self, rule: MD049, config: MD049Config) -> None:
+        """Fix returns None when there are no violations."""
+        content = load_fixture("md049", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_asterisk_style(self, rule: MD049) -> None:
+        """Fix converts underscores to asterisks when asterisk style is configured."""
+        config = MD049Config(style="asterisk")
+        content = load_fixture("md049", "underscore.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_underscore_style(self, rule: MD049) -> None:
+        """Fix converts asterisks to underscores when underscore style is configured."""
+        config = MD049Config(style="underscore")
+        content = load_fixture("md049", "asterisk.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_already_correct_style(self, rule: MD049) -> None:
+        """Fix returns None when all emphasis already matches the configured style."""
+        config = MD049Config(style="asterisk")
+        content = load_fixture("md049", "asterisk.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_no_emphasis(self, rule: MD049, config: MD049Config) -> None:
+        """Fix returns None for document without emphasis."""
+        content = load_fixture("md049", "no_emphasis.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_same_line(self, rule: MD049) -> None:
+        """Fix replaces multiple emphasis markers on the same line."""
+        config = MD049Config(style="underscore")
+        content = load_fixture("md049", "multiple_same_line.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert result.startswith("_foo_ and _bar_ and _baz_")
+
+    def test_fix_multi_line(self, rule: MD049) -> None:
+        """Fix replaces emphasis in multi-line paragraphs."""
+        config = MD049Config(style="underscore")
+        content = load_fixture("md049", "multi_line.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_skips_intraword_emphasis(self, rule: MD049) -> None:
+        """Fix does not convert intraword asterisks to underscores."""
+        config = MD049Config(style="underscore")
+        content = load_fixture("md049", "intraword.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_intraword_mixed_with_regular(self, rule: MD049) -> None:
+        """Fix converts regular mismatches but skips intraword emphasis."""
+        config = MD049Config(style="underscore")
+        doc = Document(Path("test.md"), "_regular_ and *a*1 and *wrong* emphasis.\n")
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "_wrong_" in result
+        assert "*a*1" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_empty_document(self, rule: MD049, config: MD049Config) -> None:
+        """Fix returns None for empty document."""
+        doc = Document(Path("empty.md"), "")
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fixable_property(self, rule: MD049) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

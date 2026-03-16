@@ -60,51 +60,80 @@ Missing spaces inside hashes on closed ATX style headings.
     # Pattern to strip blockquote prefixes from lines
     BLOCKQUOTE_PREFIX = re.compile(r"^(\s*>\s*)+")
 
-    def check(self, document: Document, config: MD020Config) -> list[Violation]:
-        """Check for missing spaces in closed ATX style headings."""
-        violations: list[Violation] = []
+    def _find_missing_space_lines(self, document: Document) -> list[tuple[int, str, re.Match[str]]]:
+        """Return list of (line_num, raw_line, match) for lines missing spaces."""
+        ignored_lines = document.code_block_lines | document.html_block_lines
 
-        # Build set of ignored lines (code blocks + HTML blocks), matching MD018 pattern
-        ignored_lines = self._get_code_block_lines(document)
-        for token in document.tokens:
-            if token.type == "html_block" and token.map:
-                for ln in range(token.map[0] + 1, token.map[1] + 1):
-                    ignored_lines.add(ln)
-
+        results: list[tuple[int, str, re.Match[str]]] = []
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in ignored_lines:
                 continue
 
-            # Strip blockquote prefix before matching
             stripped = self.BLOCKQUOTE_PREFIX.sub("", line)
-
             match = self.CLOSED_ATX_PATTERN.match(stripped)
             if not match:
                 continue
 
-            left_space = match.group(2)
-            right_space = match.group(4)
+            if not match.group(2) or not match.group(4):
+                results.append((line_num, line, match))
 
-            missing_left = not left_space
-            missing_right = not right_space
+        return results
 
-            if missing_left or missing_right:
-                if missing_left and missing_right:
-                    message = "No space inside hashes on closed ATX heading"
-                elif missing_left:
-                    message = "No space after opening hashes on closed ATX heading"
-                else:
-                    message = "No space before closing hashes on closed ATX heading"
+    def check(self, document: Document, config: MD020Config) -> list[Violation]:
+        """Check for missing spaces in closed ATX style headings."""
+        violations: list[Violation] = []
 
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=message,
-                        context=line,
-                    )
+        for line_num, line, match in self._find_missing_space_lines(document):
+            missing_left = not match.group(2)
+            missing_right = not match.group(4)
+
+            if missing_left and missing_right:
+                message = "No space inside hashes on closed ATX heading"
+            elif missing_left:
+                message = "No space after opening hashes on closed ATX heading"
+            else:
+                message = "No space before closing hashes on closed ATX heading"
+
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=message,
+                    context=line,
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD020Config) -> str | None:
+        """Fix missing spaces in closed ATX style headings by inserting spaces."""
+        matching_lines = self._find_missing_space_lines(document)
+        if not matching_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, line, match in matching_lines:
+            # Find where the stripped content starts (after blockquote prefix)
+            bq_match = self.BLOCKQUOTE_PREFIX.match(line)
+            prefix = bq_match.group(0) if bq_match else ""
+
+            opening_hashes = match.group(1)
+            left_space = match.group(2)
+            content = match.group(3)
+            right_space = match.group(4)
+            closing_hashes = match.group(5)
+            trailing = line[len(prefix) + match.end() :]
+
+            lines[line_num - 1] = (
+                prefix
+                + opening_hashes
+                + (left_space or " ")
+                + content
+                + (right_space or " ")
+                + closing_hashes
+                + trailing
+            )
+
+        return "\n".join(lines)

@@ -231,3 +231,211 @@ class TestMD029:
         config = MD029Config()
 
         assert config.style == "one_or_ordered"
+
+
+class TestMD029Fix:
+    @pytest.fixture
+    def rule(self) -> MD029:
+        return MD029()
+
+    def test_fix_one_style_corrects_invalid(self, rule: MD029) -> None:
+        """Fix converts inconsistent prefixes to all 1s with one style."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_one_style_returns_none_for_valid(self, rule: MD029) -> None:
+        """Fix returns None when content already uses one style."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_ordered_style_corrects_all_ones(self, rule: MD029) -> None:
+        """Fix converts all-1s list to sequential numbering with ordered style."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_ordered_style_returns_none_for_valid(self, rule: MD029) -> None:
+        """Fix returns None when content already uses ordered style."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "ordered_valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_ordered_style_preserves_zero_start(self, rule: MD029) -> None:
+        """Fix returns None for valid zero-start ordered list."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "ordered_zero_start.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_ordered_style_corrects_zero_repeat(self, rule: MD029) -> None:
+        """Fix converts 0/0/0 to 0/1/2 with ordered style."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "zero_repeat.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_zero_style_corrects_invalid(self, rule: MD029) -> None:
+        """Fix converts non-zero prefixes to all 0s with zero style."""
+        config = MD029Config(style="zero")
+        content = load_fixture("md029", "invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_zero_style_returns_none_for_valid(self, rule: MD029) -> None:
+        """Fix returns None when content already uses zero style."""
+        config = MD029Config(style="zero")
+        content = load_fixture("md029", "zero_valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_one_or_ordered_corrects_inconsistent(self, rule: MD029) -> None:
+        """Fix corrects inconsistent numbering with one_or_ordered style."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_one_or_ordered_returns_none_for_valid_one(self, rule: MD029) -> None:
+        """Fix returns None for valid one-style list with one_or_ordered."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_one_or_ordered_returns_none_for_valid_ordered(self, rule: MD029) -> None:
+        """Fix returns None for valid ordered-style list with one_or_ordered."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "ordered_valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_one_or_ordered_corrects_arbitrary_start(self, rule: MD029) -> None:
+        """Fix corrects arbitrary start numbering with one_or_ordered style."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "arbitrary_start.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_one_or_ordered_corrects_zero_repeat(self, rule: MD029) -> None:
+        """Fix corrects 0/0/0 to 0/1/2 with one_or_ordered style."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "zero_repeat.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_nested_lists(self, rule: MD029) -> None:
+        """Fix returns None for valid nested lists."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "nested.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_no_lists(self, rule: MD029) -> None:
+        """Fix returns None for document with no lists."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "no_lists.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_preserves_indentation(self, rule: MD029) -> None:
+        """Fix preserves leading indentation on list items."""
+        config = MD029Config(style="one")
+        content = "   2. Indented item\n   3. Another indented item\n"
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert "   1. Indented item\n" in result
+        assert "   1. Another indented item\n" in result
+
+    def test_fix_multiple_lists(self, rule: MD029) -> None:
+        """Fix returns None for valid multiple separate lists."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "multiple_lists.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_single_item_invalid(self, rule: MD029) -> None:
+        """Fix corrects single-item list with wrong prefix."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "single_item_invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fixable_property(self, rule: MD029) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

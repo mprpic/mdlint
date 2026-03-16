@@ -213,3 +213,91 @@ class TestMD009:
         violations = rule.check(doc, config)
 
         assert len(violations) == 1
+
+
+class TestMD009Fix:
+    @pytest.fixture
+    def rule(self) -> MD009:
+        return MD009()
+
+    @pytest.fixture
+    def config(self) -> MD009Config:
+        return MD009Config()
+
+    def test_fix_corrects_invalid(self, rule: MD009, config: MD009Config) -> None:
+        """Fix removes trailing spaces from invalid document."""
+        content = load_fixture("md009", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD009, config: MD009Config) -> None:
+        """Fix returns None when there are no violations."""
+        content = load_fixture("md009", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_hard_breaks(self, rule: MD009, config: MD009Config) -> None:
+        """Fix preserves valid hard break trailing spaces."""
+        content = load_fixture("md009", "hard_break_valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_violations(self, rule: MD009, config: MD009Config) -> None:
+        """Fix removes trailing spaces from multiple lines."""
+        content = "Line 1 \nLine 2  \nLine 3   \n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Line 2 has exactly 2 spaces (valid hard break), should be preserved
+        assert result == "Line 1\nLine 2  \nLine 3\n"
+
+    def test_fix_empty_line_with_spaces(self, rule: MD009, config: MD009Config) -> None:
+        """Fix removes spaces from blank lines."""
+        content = "# Heading\n   \nParagraph.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Heading\n\nParagraph.\n"
+
+    def test_fix_trailing_tab(self, rule: MD009, config: MD009Config) -> None:
+        """Fix removes trailing tab characters."""
+        content = "Line with tab\t\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Line with tab\n"
+
+    def test_fix_code_blocks_by_default(self, rule: MD009, config: MD009Config) -> None:
+        """Fix removes trailing spaces in code blocks by default."""
+        content = load_fixture("md009", "code_block.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_skips_code_blocks_when_configured(self, rule: MD009) -> None:
+        """Fix skips code blocks when code_blocks=False."""
+        config = MD009Config(code_blocks=False)
+        content = load_fixture("md009", "code_block.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_br_spaces_zero(self, rule: MD009) -> None:
+        """Fix removes all trailing spaces when br_spaces=0."""
+        config = MD009Config(br_spaces=0)
+        content = "Line with hard break.  \n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Line with hard break.\n"
+
+    def test_fixable_property(self, rule: MD009) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

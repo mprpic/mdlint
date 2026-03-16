@@ -60,18 +60,21 @@ Some text here.
 Some more text here.
 """
 
+    def _get_excluded_lines(self, document: Document) -> set[int]:
+        """Get line numbers inside code blocks or front matter."""
+        excluded = document.code_block_lines
+        for token in document.tokens:
+            if token.type == "front_matter" and token.map:
+                for ln in range(token.map[0] + 1, token.map[1] + 1):
+                    excluded.add(ln)
+        return excluded
+
     def check(self, document: Document, config: MD012Config) -> list[Violation]:
         """Check for multiple consecutive blank lines."""
         violations: list[Violation] = []
 
         maximum = config.maximum
-
-        # Build set of line numbers that are inside code blocks or front matter
-        excluded_lines = self._get_code_block_lines(document)
-        for token in document.tokens:
-            if token.type == "front_matter" and token.map:
-                for ln in range(token.map[0] + 1, token.map[1] + 1):
-                    excluded_lines.add(ln)
+        excluded_lines = self._get_excluded_lines(document)
 
         # Track consecutive blank line count
         blank_count = 0
@@ -103,3 +106,42 @@ Some more text here.
                 )
 
         return violations
+
+    def fix(self, document: Document, config: MD012Config) -> str | None:
+        """Fix multiple consecutive blank lines by collapsing them to the maximum allowed."""
+        maximum = config.maximum
+
+        excluded_lines = self._get_excluded_lines(document)
+
+        lines = document.content.split("\n")
+        result: list[str] = []
+        blank_count = 0
+        changed = False
+        num_lines = len(document.lines)
+
+        for line_num, line in enumerate(lines, start=1):
+            if line_num > num_lines:
+                # Preserve trailing element from split("\n") that is beyond
+                # the actual document lines (artifact of trailing newline)
+                result.append(line)
+                continue
+
+            in_excluded = line_num in excluded_lines
+
+            if in_excluded or line.strip():
+                blank_count = 0
+                result.append(line)
+                continue
+
+            blank_count += 1
+
+            if blank_count > maximum:
+                changed = True
+                continue
+
+            result.append(line)
+
+        if not changed:
+            return None
+
+        return "\n".join(result)

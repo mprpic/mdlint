@@ -122,13 +122,13 @@ Reference links [like this][ref] are also used.
             return violations
 
         # Build set of line numbers inside code blocks
-        code_block_lines = self._get_code_block_lines(document)
+        code_block_lines = document.code_block_lines
 
         # Build map of inline code span columns per line
-        code_span_positions = self._get_code_span_positions(document)
+        code_span_positions = document.code_span_positions
 
         # Parse reference definitions for resolving shortcuts
-        reference_definitions = self._get_reference_definitions(document)
+        reference_definitions = document.reference_definitions
 
         for line_num, line in enumerate(document.lines, start=1):
             # Skip lines in code blocks

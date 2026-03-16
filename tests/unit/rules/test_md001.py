@@ -135,3 +135,74 @@ class TestMD001:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD001Fix:
+    @pytest.fixture
+    def rule(self) -> MD001:
+        return MD001()
+
+    @pytest.fixture
+    def config(self) -> MD001Config:
+        return MD001Config()
+
+    def test_fix_corrects_invalid(self, rule: MD001, config: MD001Config) -> None:
+        """Fix adjusts heading levels to increment by one."""
+        content = load_fixture("md001", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD001, config: MD001Config) -> None:
+        """Fix returns None when there are no violations."""
+        content = load_fixture("md001", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_setext_invalid(self, rule: MD001, config: MD001Config) -> None:
+        """Fix adjusts ATX headings after setext headings."""
+        content = load_fixture("md001", "setext_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_front_matter_title_invalid(self, rule: MD001, config: MD001Config) -> None:
+        """Fix adjusts heading after front matter title (implicit h1)."""
+        content = load_fixture("md001", "front_matter_title_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "## First Heading Should Be H2" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_no_headings(self, rule: MD001, config: MD001Config) -> None:
+        """Fix returns None for document without headings."""
+        content = load_fixture("md001", "no_headings.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_decreasing_levels(self, rule: MD001, config: MD001Config) -> None:
+        """Fix returns None for valid decreasing heading levels."""
+        content = load_fixture("md001", "decreasing_levels.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_heading_text(self, rule: MD001, config: MD001Config) -> None:
+        """Fix preserves heading text while adjusting level."""
+        content = "# Heading 1\n\n### My Important Heading\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "## My Important Heading" in result
+
+    def test_fixable_property(self, rule: MD001) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

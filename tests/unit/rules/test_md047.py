@@ -127,3 +127,40 @@ class TestMD047:
         assert len(violations) == 1
         assert "newline" in violations[0].message.lower()
         assert "end" in violations[0].message.lower()
+
+    def test_fix_corrects_invalid(self, rule: MD047, config: MD047Config) -> None:
+        """Fixing invalid document adds trailing newline."""
+        content = load_fixture("md047", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result.endswith("\n")
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD047, config: MD047Config) -> None:
+        """Fixing valid document returns None."""
+        content = load_fixture("md047", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_empty_file(self, rule: MD047, config: MD047Config) -> None:
+        """Fixing empty file returns None."""
+        doc = Document(Path("test.md"), "")
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_single_character_no_newline(self, rule: MD047, config: MD047Config) -> None:
+        """Fixing single character without newline appends one."""
+        doc = Document(Path("test.md"), "x")
+        result = rule.fix(doc, config)
+        assert result == "x\n"
+
+    def test_fix_preserves_multiple_trailing_newlines(
+        self, rule: MD047, config: MD047Config
+    ) -> None:
+        """Fixing already-valid file with multiple trailing newlines returns None."""
+        doc = Document(Path("test.md"), "# Heading\n\n\n")
+        result = rule.fix(doc, config)
+        assert result is None

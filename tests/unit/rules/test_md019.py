@@ -98,3 +98,54 @@ class TestMD019:
         assert len(violations) == 2
         assert violations[0].line == 1
         assert violations[1].line == 3
+
+    def test_fix_corrects_invalid(self, rule: MD019, config: MD019Config) -> None:
+        """Fix collapses multiple spaces after hash to a single space."""
+        content = load_fixture("md019", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading 1\n" in result
+        assert "## Heading 2\n" in result
+        assert "### Heading 3\n" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD019, config: MD019Config) -> None:
+        """Fix returns None when content is already valid."""
+        content = load_fixture("md019", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_mixed_valid_invalid(self, rule: MD019, config: MD019Config) -> None:
+        """Fix only modifies invalid headings, leaving valid ones untouched."""
+        content = load_fixture("md019", "mixed_valid_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        expected = (
+            "# Valid heading\n\n"
+            "## Invalid heading with multiple spaces\n\n"
+            "### Another valid heading\n"
+        )
+        assert result == expected
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_three_or_more_spaces(self, rule: MD019, config: MD019Config) -> None:
+        """Fix handles three or more spaces after hash."""
+        content = "#   Three spaces\n\n##    Four spaces\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Three spaces\n\n## Four spaces\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_ignores_code_blocks(self, rule: MD019, config: MD019Config) -> None:
+        """Fix does not modify lines inside code blocks."""
+        content = "# Valid Heading\n\n```\n#  Not a heading\n##   Also not a heading\n```\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

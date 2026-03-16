@@ -62,15 +62,13 @@ Headings with leading spaces.
     # Pattern to match indented ATX-style headings (not in blockquotes)
     INDENTED_ATX_PATTERN = re.compile(r"^[ \t]+#{1,6}(?:\s|$)")
 
-    def check(self, document: Document, config: MD023Config) -> list[Violation]:
-        """Check for headings not starting at beginning of line."""
-        violations: list[Violation] = []
-
-        # Build set of line numbers inside code blocks and list items
-        code_block_lines = self._get_code_block_lines(document)
+    def _find_indented_heading_lines(self, document: Document) -> set[int]:
+        """Return set of 1-indexed line numbers with indented headings."""
+        code_block_lines = document.code_block_lines
         list_item_lines = self._get_list_item_lines(document)
+        result: set[int] = set()
 
-        # Check for properly parsed setext headings that have indented text
+        # Find indented setext headings (parsed as heading tokens)
         list_depth = 0
         for token in document.tokens:
             if token.type == "list_item_open":
@@ -83,18 +81,9 @@ Headings with leading spaces.
                     line_num = token.map[0] + 1  # 1-indexed
                     raw_line = document.get_line(line_num)
                     if raw_line and raw_line[0] in (" ", "\t"):
-                        violations.append(
-                            Violation(
-                                line=line_num,
-                                column=1,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message="Heading must start at the beginning of the line",
-                                context=raw_line,
-                            )
-                        )
+                        result.add(line_num)
 
-        # Check for indented ATX-style headings (not parsed as headings)
+        # Find indented ATX-style headings (not parsed as headings)
         for line_num, line in enumerate(document.lines, start=1):
             # Skip lines inside code blocks or list items
             if line_num in code_block_lines or line_num in list_item_lines:
@@ -102,19 +91,39 @@ Headings with leading spaces.
 
             # Check if line looks like an indented ATX heading
             if self.INDENTED_ATX_PATTERN.match(line):
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message="Heading must start at the beginning of the line",
-                        context=line,
-                    )
-                )
+                result.add(line_num)
 
-        violations.sort(key=lambda v: v.line)
+        return result
+
+    def check(self, document: Document, config: MD023Config) -> list[Violation]:
+        """Check for headings not starting at beginning of line."""
+        violations: list[Violation] = []
+
+        for line_num in sorted(self._find_indented_heading_lines(document)):
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message="Heading must start at the beginning of the line",
+                    context=document.get_line(line_num),
+                )
+            )
+
         return violations
+
+    def fix(self, document: Document, config: MD023Config) -> str | None:
+        """Fix headings by removing leading whitespace."""
+        fix_lines = self._find_indented_heading_lines(document)
+        if not fix_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num in fix_lines:
+            lines[line_num - 1] = lines[line_num - 1].lstrip()
+
+        return "\n".join(lines)
 
     @staticmethod
     def _get_list_item_lines(document: Document) -> set[int]:

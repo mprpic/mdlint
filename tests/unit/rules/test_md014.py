@@ -154,3 +154,76 @@ class TestMD014:
         assert len(violations) == 2
         assert violations[0].line == 2
         assert violations[1].line == 4
+
+
+class TestMD014Fix:
+    @pytest.fixture
+    def rule(self) -> MD014:
+        return MD014()
+
+    @pytest.fixture
+    def config(self) -> MD014Config:
+        return MD014Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD014, config: MD014Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md014", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_corrects_invalid(self, rule: MD014, config: MD014Config) -> None:
+        """Fixing invalid content removes dollar sign prefixes."""
+        content = load_fixture("md014", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Verify fixed content has no violations
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # Verify the commands are preserved without dollar signs
+        assert "ls\n" in result
+        assert "cat foo\n" in result
+        assert "less bar\n" in result
+
+    def test_fix_indented_code_block(self, rule: MD014, config: MD014Config) -> None:
+        """Fixing indented code blocks removes dollar sign prefixes."""
+        content = load_fixture("md014", "indented_code.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_mixed_output_unchanged(self, rule: MD014, config: MD014Config) -> None:
+        """Code blocks with output are not modified."""
+        content = load_fixture("md014", "mixed_output.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_code_blocks(self, rule: MD014, config: MD014Config) -> None:
+        """Only code blocks where all lines have $ are fixed."""
+        content = "```\n$ ls\n$ cat foo\n```\n\n```\n$ ls\nfoo bar\n$ cat baz\nqux\n```\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # First block fixed, second block unchanged
+        assert "```\nls\ncat foo\n```" in result
+        assert "$ ls\nfoo bar\n$ cat baz\nqux" in result
+
+    def test_fix_blank_lines_between_commands(self, rule: MD014, config: MD014Config) -> None:
+        """Blank lines between commands are preserved."""
+        content = "```\n$ ls\n\n$ cat foo\n```\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "```\nls\n\ncat foo\n```" in result
+
+    def test_fix_indented_dollar_signs(self, rule: MD014, config: MD014Config) -> None:
+        """Indented dollar signs are fixed, preserving indentation."""
+        content = "```\n  $ ls\n  $ cat\n```"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "```\n  ls\n  cat\n```" in result

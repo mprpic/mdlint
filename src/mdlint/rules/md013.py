@@ -105,7 +105,7 @@ Another paragraph with a line that is also way too long and should be flagged by
 
         # Build sets of line numbers for different content types
         heading_lines = self._get_heading_lines(document)
-        code_block_lines = self._get_code_block_lines(document)
+        code_block_lines = document.code_block_lines
         table_lines = self._get_table_lines(document)
         ref_def_lines = self._get_reference_definition_lines(document)
         link_only_lines = self._get_link_only_lines(document)

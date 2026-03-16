@@ -272,3 +272,148 @@ class TestMD022:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD022Fix:
+    @pytest.fixture
+    def rule(self) -> MD022:
+        return MD022()
+
+    @pytest.fixture
+    def config(self) -> MD022Config:
+        return MD022Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD022, config: MD022Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md022", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_corrects_invalid(self, rule: MD022, config: MD022Config) -> None:
+        """Fixing invalid content produces valid output."""
+        content = load_fixture("md022", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_adds_blank_line_below(self, rule: MD022, config: MD022Config) -> None:
+        """Adds missing blank line below a heading."""
+        content = "# Heading\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\nSome text.\n"
+
+    def test_fix_adds_blank_line_above(self, rule: MD022, config: MD022Config) -> None:
+        """Adds missing blank line above a heading."""
+        content = "Some text.\n## Heading\n\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Some text.\n\n## Heading\n\nMore text.\n"
+
+    def test_fix_adds_blank_lines_above_and_below(self, rule: MD022, config: MD022Config) -> None:
+        """Adds missing blank lines both above and below headings."""
+        content = "# Heading 1\nSome text.\nSome more text.\n## Heading 2\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_first_heading_no_blank_above(self, rule: MD022, config: MD022Config) -> None:
+        """First heading at start of document doesn't get blank line above."""
+        content = "# Heading\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        # Should only add blank line below, not above
+        assert result == "# Heading\n\nSome text.\n"
+
+    def test_fix_last_heading_at_end(self, rule: MD022, config: MD022Config) -> None:
+        """Last heading at end of document doesn't get blank line below."""
+        content = "Some text.\n# Heading\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        # Should only add blank line above, not below
+        assert result == "Some text.\n\n# Heading\n"
+
+    def test_fix_custom_lines_above(self, rule: MD022) -> None:
+        """Fixes with custom lines_above=2."""
+        config = MD022Config(lines_above=2)
+        content = "Some text.\n\n# Heading\n\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Some text.\n\n\n# Heading\n\nMore text.\n"
+
+    def test_fix_custom_lines_below(self, rule: MD022) -> None:
+        """Fixes with custom lines_below=2."""
+        config = MD022Config(lines_below=2)
+        content = "# Heading\n\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\n\nSome text.\n"
+
+    def test_fix_disabled_lines_above(self, rule: MD022) -> None:
+        """lines_above=-1 disables fix above."""
+        config = MD022Config(lines_above=-1)
+        content = "Some text.\n## Heading\n\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_disabled_lines_below(self, rule: MD022) -> None:
+        """lines_below=-1 disables fix below."""
+        config = MD022Config(lines_below=-1)
+        content = "# Heading\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_consecutive_headings(self, rule: MD022, config: MD022Config) -> None:
+        """Fixes consecutive headings without blank line between them."""
+        content = "# Heading 1\n## Heading 2\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_setext_heading_missing_blank_below(self, rule: MD022, config: MD022Config) -> None:
+        """Fixes setext heading missing blank line below."""
+        content = load_fixture("md022", "setext_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_setext_heading_missing_blank_above(self, rule: MD022, config: MD022Config) -> None:
+        """Fixes setext heading missing blank line above."""
+        content = "***\nSetext Heading\n==============\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_front_matter_needs_blank(self, rule: MD022, config: MD022Config) -> None:
+        """Fixes heading after front matter that needs a blank line."""
+        content = "---\ntitle: test\n---\n# Heading\n\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "---\ntitle: test\n---\n\n# Heading\n\nSome text.\n"
+
+    def test_fix_empty_document(self, rule: MD022, config: MD022Config) -> None:
+        """Empty document returns None."""
+        content = ""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_extra_blank_lines(self, rule: MD022, config: MD022Config) -> None:
+        """Extra blank lines beyond requirement are preserved."""
+        content = "# Heading 1\n\n\n\nSome text.\n\n\n\n## Heading 2\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

@@ -221,3 +221,138 @@ class TestMD003:
         assert violations[0].message == "Expected setext, found atx"
         assert violations[1].line == 6
         assert violations[1].message == "Expected atx_closed, found atx"
+
+
+class TestMD003Fix:
+    @pytest.fixture
+    def rule(self) -> MD003:
+        return MD003()
+
+    @pytest.fixture
+    def config(self) -> MD003Config:
+        return MD003Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD003, config: MD003Config) -> None:
+        """Valid document should return None (nothing to fix)."""
+        content = load_fixture("md003", "valid.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_no_headings(self, rule: MD003, config: MD003Config) -> None:
+        """Document with no headings should return None."""
+        content = load_fixture("md003", "no_headings.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_consistent_setext_to_atx(self, rule: MD003, config: MD003Config) -> None:
+        """Fix mixed styles in consistent mode (first heading is ATX)."""
+        content = load_fixture("md003", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "## Setext Heading 2" in result
+        assert "----------------" not in result
+
+    def test_fix_consistent_setext_first_skips_unfixable_h3(
+        self, rule: MD003, config: MD003Config
+    ) -> None:
+        """Consistent mode with setext first can't fix h3 (setext only supports h1/h2)."""
+        content = load_fixture("md003", "setext_first.md")
+        doc = Document(Path("test.md"), content)
+        # h3 can't be converted to setext, so nothing can be fixed
+        assert rule.fix(doc, config) is None
+
+    def test_fix_consistent_atx_closed_first(self, rule: MD003, config: MD003Config) -> None:
+        """Fix mixed styles in consistent mode (first heading is atx_closed)."""
+        content = load_fixture("md003", "atx_closed_first.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "### Heading 3 ###" in result
+
+    def test_fix_atx_closed_from_atx(self, rule: MD003) -> None:
+        """Fix ATX headings to atx_closed style."""
+        config = MD003Config(style="atx_closed")
+        content = load_fixture("md003", "atx_style.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "# ATX H1 #" in result
+        assert "## ATX H2 ##" in result
+        assert "### ATX H3 ###" in result
+
+    def test_fix_atx_from_atx_closed(self, rule: MD003) -> None:
+        """Fix atx_closed headings to ATX style."""
+        config = MD003Config(style="atx")
+        content = load_fixture("md003", "atx_closed_style.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "# ATX Closed Heading 1\n" in result
+        assert "## ATX Closed Heading 2\n" in result
+        assert "### ATX Closed Heading 3\n" in result
+
+    def test_fix_setext_from_atx(self, rule: MD003) -> None:
+        """Fix ATX headings to setext style (h1/h2 only)."""
+        config = MD003Config(style="setext")
+        content = load_fixture("md003", "atx_style.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "ATX H1\n======" in result
+        assert "ATX H2\n------" in result
+        # h3 can't be converted to setext, remains as ATX
+        assert "### ATX H3" in result
+
+    def test_fix_atx_from_setext(self, rule: MD003) -> None:
+        """Fix setext headings to ATX style."""
+        config = MD003Config(style="atx")
+        content = load_fixture("md003", "setext_style.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "# Setext H1" in result
+        assert "## Setext H2" in result
+        assert "=========" not in result
+        assert "---------" not in result
+
+    def test_fix_setext_with_atx_invalid(self, rule: MD003) -> None:
+        """Fix setext_with_atx: h1 should use setext."""
+        config = MD003Config(style="setext_with_atx")
+        content = load_fixture("md003", "setext_with_atx_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_setext_with_atx_closed_invalid(self, rule: MD003) -> None:
+        """Fix setext_with_atx_closed: h1 to setext, h3 to atx_closed."""
+        config = MD003Config(style="setext_with_atx_closed")
+        content = load_fixture("md003", "setext_with_atx_closed_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_already_valid_atx_closed(self, rule: MD003) -> None:
+        """Already valid atx_closed document should return None."""
+        config = MD003Config(style="atx_closed")
+        content = load_fixture("md003", "atx_closed_style.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fixable_property(self, rule: MD003) -> None:
+        """Rule should report as fixable."""
+        assert rule.fixable is True

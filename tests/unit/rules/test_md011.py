@@ -173,3 +173,58 @@ class TestMD011:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD011, config: MD011Config) -> None:
+        """Fix converts reversed link syntax to correct syntax."""
+        content = load_fixture("md011", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Verify the fixed content has no violations
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # Verify specific corrections
+        assert "[incorrect link syntax](https://www.example.com/)" in result
+        assert "[another bad link](https://example.org/page)" in result
+
+    def test_fix_returns_none_for_valid(self, rule: MD011, config: MD011Config) -> None:
+        """Fix returns None when there are no reversed links."""
+        content = load_fixture("md011", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_code_blocks(self, rule: MD011, config: MD011Config) -> None:
+        """Fix does not modify reversed links inside code blocks."""
+        content = load_fixture("md011", "code_blocks.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_footnotes(self, rule: MD011, config: MD011Config) -> None:
+        """Fix does not modify footnote syntax."""
+        content = load_fixture("md011", "footnotes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_on_same_line(self, rule: MD011, config: MD011Config) -> None:
+        """Fix corrects multiple reversed links on the same line."""
+        content = "(first)[https://first.com/] and (second)[https://second.com/]"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "[first](https://first.com/) and [second](https://second.com/)"
+
+    def test_fix_preserves_inline_code(self, rule: MD011, config: MD011Config) -> None:
+        """Fix does not modify reversed links inside inline code."""
+        content = "Use `(text)[link]` for reversed syntax example."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_empty_document(self, rule: MD011, config: MD011Config) -> None:
+        """Fix returns None for empty document."""
+        doc = Document(Path("test.md"), "")
+        result = rule.fix(doc, config)
+        assert result is None

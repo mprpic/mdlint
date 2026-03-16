@@ -78,24 +78,25 @@ Indented code block:
     ls -la
 """
 
-    def check(self, document: Document, config: MD046Config) -> list[Violation]:
-        """Check for code block style consistency."""
-        violations: list[Violation] = []
+    def _find_mismatched_blocks(self, document: Document, config: MD046Config) -> tuple[str, list]:
+        """Return (expected_style, mismatched_tokens) for code blocks.
 
+        Returns the resolved expected style and a list of tokens whose style
+        does not match. Returns ("", []) if there are no code blocks.
+        """
         expected_style: str | None = None
         if config.style in ("fenced", "indented"):
             expected_style = config.style
 
+        mismatched = []
         for token in document.tokens:
             # fence = fenced code block (```)
             # code_block = indented code block (4 spaces)
             if token.type not in ("fence", "code_block"):
                 continue
-
             if not token.map:
                 continue
 
-            line = token.map[0] + 1
             current_style = "fenced" if token.type == "fence" else "indented"
 
             if expected_style is None:
@@ -103,16 +104,74 @@ Indented code block:
                 continue
 
             if current_style != expected_style:
-                msg = f"Code block style: expected {expected_style}, found {current_style}"
-                violations.append(
-                    Violation(
-                        line=line,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=msg,
-                        context=document.get_line(line),
-                    )
+                mismatched.append(token)
+
+        return expected_style or "", mismatched
+
+    def check(self, document: Document, config: MD046Config) -> list[Violation]:
+        """Check for code block style consistency."""
+        expected_style, mismatched = self._find_mismatched_blocks(document, config)
+        violations: list[Violation] = []
+
+        for token in mismatched:
+            line = token.map[0] + 1
+            current_style = "fenced" if token.type == "fence" else "indented"
+            msg = f"Code block style: expected {expected_style}, found {current_style}"
+            violations.append(
+                Violation(
+                    line=line,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=msg,
+                    context=document.get_line(line),
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD046Config) -> str | None:
+        """Fix code block style by converting blocks to the configured style."""
+        expected_style, tokens_to_fix = self._find_mismatched_blocks(document, config)
+
+        if not tokens_to_fix:
+            return None
+
+        lines = document.content.split("\n")
+
+        # Process in reverse order to maintain correct line numbers
+        for token in reversed(tokens_to_fix):
+            start, end = token.map
+
+            if expected_style == "fenced":
+                # Convert indented → fenced: remove 4-space indent, wrap in ```
+                content_lines = []
+                for i in range(start, end):
+                    line = lines[i]
+                    if line.startswith("    "):
+                        content_lines.append(line[4:])
+                    elif line.strip() == "":
+                        content_lines.append("")
+                    else:
+                        content_lines.append(line)
+                lines[start:end] = ["```"] + content_lines + ["```"]
+
+            elif expected_style == "indented":
+                # Convert fenced → indented: remove fence lines, add 4-space indent
+                # Skip fenced blocks with indented fences (e.g. inside lists)
+                if lines[start] != lines[start].lstrip():
+                    continue
+
+                content_lines = []
+                for i in range(start + 1, end - 1):
+                    line = lines[i]
+                    if line.strip() == "":
+                        content_lines.append("")
+                    else:
+                        content_lines.append("    " + line)
+                lines[start:end] = content_lines
+
+        result = "\n".join(lines)
+        if result == document.content:
+            return None
+        return result

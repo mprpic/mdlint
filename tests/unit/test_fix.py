@@ -4,6 +4,7 @@ from mdlint.document import Document
 from mdlint.linter import FileResult, Linter, LintResult
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
+from tests.conftest import load_fixture
 
 
 class TestRuleFixDefault:
@@ -22,9 +23,9 @@ class TestRuleFixDefault:
 
     def test_fixable_false_by_default(self) -> None:
         """Rules without fix() override are not fixable."""
-        from mdlint.rules.md001 import MD001  # noqa: PLC0415
+        from mdlint.rules.md013 import MD013  # noqa: PLC0415
 
-        rule = MD001()
+        rule = MD013()
 
         assert rule.fixable is False
 
@@ -106,13 +107,13 @@ class TestLinterFixFile:
     def test_fix_file_preserves_violations(self) -> None:
         """fix_file still reports remaining violations."""
         linter = Linter()
-        content = "# H1\n\n### H3\n"
+        content = "# Heading\n\n# Heading\n"
 
         result = linter.fix_file(Path("test.md"), content=content)
 
         assert result.was_fixed is False
-        md001_violations = [v for v in result.violations if v.rule_id == "MD001"]
-        assert len(md001_violations) >= 1
+        md024_violations = [v for v in result.violations if v.rule_id == "MD024"]
+        assert len(md024_violations) >= 1
 
     def test_fix_file_writes_back(self, tmp_path) -> None:
         """fix_file writes fixed content back to disk."""
@@ -125,6 +126,28 @@ class TestLinterFixFile:
         # No fixable rules, so file should be unchanged
         assert result.was_fixed is False
         assert test_file.read_text() == "# Heading\n\nSome content.\n"
+
+    def test_fix_file_respects_suppression(self) -> None:
+        """fix_file skips fixes for rules suppressed by inline directives."""
+        linter = Linter(enabled_rules={"MD047"})
+        content = load_fixture("suppression", "fix_suppressed.md")
+
+        result = linter.fix_file(Path("test.md"), content=content)
+
+        assert result.was_fixed is False
+        assert result.content == content
+
+    def test_fix_file_applies_non_suppressed(self, tmp_path) -> None:
+        """fix_file still applies fixes for rules that are not suppressed."""
+        linter = Linter(enabled_rules={"MD047"})
+        content = load_fixture("md047", "invalid.md")
+        test_file = tmp_path / "test.md"
+        test_file.write_text(content)
+
+        result = linter.fix_file(test_file, content=content)
+
+        assert result.was_fixed is True
+        assert result.content.endswith("\n")
 
     def test_fix_stdin(self) -> None:
         """fix_stdin returns result and fixed content."""

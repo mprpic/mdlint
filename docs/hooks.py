@@ -71,17 +71,12 @@ def _build_rule_doc(rule_id: str) -> str:
         "---\nhide:\n  - toc\n---\n",
         # Title
         f"# {rule_class.id} - {rule_class.name}\n",
+        "## Description\n",
+        f"{rule_class.description or ''}\n",
+        "\n**Fixable:** Yes\n\n" if rule_instance.fixable else "\n**Fixable:** No\n\n",
+        "## Rationale\n",
+        f"{rule_class.rationale or ''}\n",
     ]
-    if rule_instance.fixable:
-        parts.append("**Fixable:** Yes\n")
-    parts.extend(
-        [
-            "## Description\n",
-            f"{rule_class.description or ''}\n",
-            "## Rationale\n",
-            f"{rule_class.rationale or ''}\n",
-        ]
-    )
     if config_fields:
         parts.append("## Configuration\n")
         for field in config_fields:
@@ -130,7 +125,7 @@ def _build_rules_index_table() -> str:
     for rule_id in sorted(RULE_REGISTRY.keys()):
         rule_class = RULE_REGISTRY[rule_id]
         rule_instance = rule_class()
-        fixable = "✓" if rule_instance.fixable else ""
+        fixable = "✓ Yes" if rule_instance.fixable else "✘ No"
         lines.append(
             f"| [{rule_class.id}](./{rule_class.id.lower()}.md) "
             f"| {rule_class.name} "

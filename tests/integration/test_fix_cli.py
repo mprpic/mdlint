@@ -24,12 +24,13 @@ class TestCLIFix:
 
         assert result.exit_code == 0
 
-    def test_fix_no_fixable_rules(self) -> None:
-        """--fix with no fixable rules still reports violations."""
+    def test_fix_unfixable_violations_still_reported(self, tmp_path) -> None:
+        """--fix still reports unfixable violations."""
         runner = CliRunner()
-        path = fixture_path("cli", "with_violations.md")
+        test_file = tmp_path / "test.md"
+        test_file.write_text("# Heading\n\n# Heading\n")
 
-        result = runner.invoke(cli, ["check", "--fix", str(path)])
+        result = runner.invoke(cli, ["check", "--fix", str(test_file)])
 
         assert result.exit_code == 1
 
@@ -46,7 +47,7 @@ class TestCLIFix:
     def test_fix_stdin_with_violations(self) -> None:
         """--fix with stdin and unfixable violations exits with code 1."""
         runner = CliRunner()
-        content = "# H1\n\n### H3\n"
+        content = "# Heading\n\n# Heading\n"
 
         result = runner.invoke(cli, ["check", "--fix", "-"], input=content)
 

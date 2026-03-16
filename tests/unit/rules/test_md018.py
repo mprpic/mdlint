@@ -95,3 +95,46 @@ class TestMD018:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD018, config: MD018Config) -> None:
+        """Fix inserts space after hash in invalid headings."""
+        content = load_fixture("md018", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        expected = load_fixture("md018", "valid.md")
+        assert result == expected
+        # Verify the fixed content has no violations
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD018, config: MD018Config) -> None:
+        """Fix returns None when content is already valid."""
+        content = load_fixture("md018", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_mixed_valid_invalid(self, rule: MD018, config: MD018Config) -> None:
+        """Fix only modifies invalid headings, leaving valid ones untouched."""
+        content = "# Valid\n\n##Invalid\n\n### Also Valid\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Valid\n\n## Invalid\n\n### Also Valid\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_ignores_code_blocks(self, rule: MD018, config: MD018Config) -> None:
+        """Fix does not modify lines inside code blocks."""
+        content = load_fixture("md018", "code_blocks.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_ignores_html_blocks(self, rule: MD018, config: MD018Config) -> None:
+        """Fix does not modify lines inside HTML blocks."""
+        content = load_fixture("md018", "html_block.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

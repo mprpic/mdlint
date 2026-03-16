@@ -59,13 +59,12 @@ Some text here.
 # More text here.
 """
 
-    def check(self, document: Document, config: MD032Config) -> list[Violation]:
-        """Check for blanks-around-lists violations."""
-        violations: list[Violation] = []
+    def _get_list_ranges(self, document: Document) -> list[tuple[int, int]]:
+        """Return top-level list ranges as 1-indexed (start, end) tuples.
 
-        # Collect top-level list ranges (start, end) as 1-indexed lines.
-        # markdown-it-py splits lists with mixed markers into separate
-        # tokens; merge consecutive ranges so they are treated as one list.
+        markdown-it-py splits lists with mixed markers into separate
+        tokens; merge consecutive ranges so they are treated as one list.
+        """
         list_ranges: list[tuple[int, int]] = []
         nesting = 0
 
@@ -89,7 +88,13 @@ Some text here.
             elif token.type in ("bullet_list_close", "ordered_list_close"):
                 nesting -= 1
 
-        for list_start, list_end in list_ranges:
+        return list_ranges
+
+    def check(self, document: Document, config: MD032Config) -> list[Violation]:
+        """Check for blanks-around-lists violations."""
+        violations: list[Violation] = []
+
+        for list_start, list_end in self._get_list_ranges(document):
             # Check blank line above
             if list_start > 1:
                 line_above = document.get_line(list_start - 1)
@@ -125,3 +130,35 @@ Some text here.
                     )
 
         return violations
+
+    def fix(self, document: Document, config: MD032Config) -> str | None:
+        """Fix blanks-around-lists violations by inserting missing blank lines."""
+        list_ranges = self._get_list_ranges(document)
+        if not list_ranges:
+            return None
+
+        lines = document.content.split("\n")
+        num_doc_lines = len(document.lines)
+        changed = False
+
+        # Process lists from bottom to top so insertions don't shift indices
+        for list_start, list_end in reversed(list_ranges):
+            # list_start/list_end are 1-indexed
+
+            # Fix blank line below: list token maps may include a trailing
+            # blank line; only check below if the last mapped line is non-blank.
+            last_line = document.get_line(list_end)
+            if last_line is not None and last_line.strip() != "" and list_end < num_doc_lines:
+                if lines[list_end].strip() != "":
+                    lines.insert(list_end, "")
+                    changed = True
+
+            # Fix blank line above
+            if list_start > 1 and lines[list_start - 2].strip() != "":
+                lines.insert(list_start - 1, "")
+                changed = True
+
+        if not changed:
+            return None
+
+        return "\n".join(lines)

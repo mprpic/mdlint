@@ -87,16 +87,16 @@ This is an image: ![alt text][no-image]
         violations: list[Violation] = []
 
         # Build set of defined labels (case-insensitive)
-        defined_labels = set(self._get_reference_definitions(document).keys())
+        defined_labels = set(document.reference_definitions.keys())
 
         # Build set of ignored labels (case-insensitive)
         ignored = {label.lower() for label in config.ignored_labels}
 
         # Get lines in code blocks and HTML blocks to skip
-        skip_lines = self._get_code_block_lines(document) | self._get_html_block_lines(document)
+        skip_lines = document.code_block_lines | document.html_block_lines
 
         # Get inline code span columns per line
-        code_span_positions = self._get_code_span_positions(document)
+        code_span_positions = document.code_span_positions
 
         # Patterns to check: (pattern, extra_filter)
         patterns: list[tuple[re.Pattern, bool]] = [

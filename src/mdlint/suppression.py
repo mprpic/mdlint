@@ -2,7 +2,6 @@ import re
 from dataclasses import dataclass
 
 from mdlint.document import Document
-from mdlint.rules.base import Rule
 from mdlint.violation import Violation
 
 DIRECTIVE_PATTERN = re.compile(
@@ -21,7 +20,7 @@ class Directive:
 
 def _parse_directives(document: Document) -> list[Directive]:
     """Parse suppression directives from document lines, skipping code blocks."""
-    code_block_lines = Rule._get_code_block_lines(document)
+    code_block_lines = document.code_block_lines
     directives: list[Directive] = []
 
     for line_num, line in enumerate(document.lines, start=1):

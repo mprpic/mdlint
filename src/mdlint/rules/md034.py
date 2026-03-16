@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from mdlint.document import Document
@@ -71,73 +72,86 @@ Contact us at user@example.com for support.
         re.IGNORECASE,
     )
 
-    # Pattern to match reference link definitions: [label]: url
-    REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[[^\]]+\]:\s*")
-
     # Pattern to match HTML tags (used to exclude URLs in attributes)
     HTML_TAG_PATTERN = re.compile(r"<[a-zA-Z/][^>]*>")
 
     TRAILING_PUNCT = ".,:;?!"
 
-    def check(self, document: Document, config: MD034Config) -> list[Violation]:
-        """Check for bare URLs in the document."""
-        violations: list[Violation] = []
+    def _find_bare_urls(self, document: Document) -> Iterator[tuple[int, int, int, str]]:
+        """Yield bare URL/email matches.
 
-        code_block_lines = self._get_code_block_lines(document)
-        code_span_positions = self._get_code_span_positions(document)
+        Yields tuples of (line_num, start, end, bare_text) where start/end are
+        0-indexed column positions within the line.
+        """
+        code_block_lines = document.code_block_lines
+        code_span_positions = document.code_span_positions
 
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in code_block_lines:
                 continue
 
+            has_url = "://" in line
+            has_email = "@" in line
+            if not has_url and not has_email:
+                continue
+
             if self.REFERENCE_DEF_PATTERN.match(line):
                 continue
 
-            # Find HTML tag ranges to exclude URLs inside attributes
-            html_ranges = [(m.start(), m.end()) for m in self.HTML_TAG_PATTERN.finditer(line)]
+            html_ranges = (
+                [(m.start(), m.end()) for m in self.HTML_TAG_PATTERN.finditer(line)]
+                if "<" in line
+                else []
+            )
 
-            # Check for bare URLs
-            for match in self.URL_PATTERN.finditer(line):
-                column = match.start() + 1
+            if has_url:
+                for match in self.URL_PATTERN.finditer(line):
+                    column = match.start() + 1
+                    if column in code_span_positions.get(line_num, set()):
+                        continue
+                    if self._overlaps_ranges(match.start(), match.end(), html_ranges):
+                        continue
+                    url = match.group(0).rstrip(self.TRAILING_PUNCT)
+                    yield line_num, match.start(), match.start() + len(url), url
 
-                if column in code_span_positions.get(line_num, set()):
-                    continue
+            if has_email:
+                for match in self.EMAIL_PATTERN.finditer(line):
+                    column = match.start() + 1
+                    if column in code_span_positions.get(line_num, set()):
+                        continue
+                    if self._overlaps_ranges(match.start(), match.end(), html_ranges):
+                        continue
+                    email = match.group(1)
+                    yield line_num, match.start(1), match.start(1) + len(email), email
 
-                if self._overlaps_ranges(match.start(), match.end(), html_ranges):
-                    continue
+    def check(self, document: Document, config: MD034Config) -> list[Violation]:
+        """Check for bare URLs in the document."""
+        return [
+            Violation(
+                line=line_num,
+                column=start + 1,
+                rule_id=self.id,
+                rule_name=self.name,
+                message=f"Bare URL used: {bare_text}",
+                context=document.get_line(line_num),
+            )
+            for line_num, start, _, bare_text in self._find_bare_urls(document)
+        ]
 
-                url = match.group(0).rstrip(self.TRAILING_PUNCT)
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=column,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=f"Bare URL used: {url}",
-                        context=document.get_line(line_num),
-                    )
-                )
+    def fix(self, document: Document, config: MD034Config) -> str | None:
+        """Fix bare URLs and emails by wrapping them in angle brackets."""
+        matches_by_line: dict[int, list[tuple[int, int, str]]] = {}
+        for line_num, start, end, bare_text in self._find_bare_urls(document):
+            matches_by_line.setdefault(line_num, []).append((start, end, bare_text))
 
-            # Check for bare email addresses
-            for match in self.EMAIL_PATTERN.finditer(line):
-                column = match.start() + 1
+        if not matches_by_line:
+            return None
 
-                if column in code_span_positions.get(line_num, set()):
-                    continue
+        lines = document.content.split("\n")
+        for line_num, replacements in matches_by_line.items():
+            line = lines[line_num - 1]
+            for start, end, bare_text in sorted(replacements, key=lambda r: r[0], reverse=True):
+                line = line[:start] + f"<{bare_text}>" + line[end:]
+            lines[line_num - 1] = line
 
-                if self._overlaps_ranges(match.start(), match.end(), html_ranges):
-                    continue
-
-                email = match.group(1)
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=column,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=f"Bare URL used: {email}",
-                        context=document.get_line(line_num),
-                    )
-                )
-
-        return violations
+        return "\n".join(lines)

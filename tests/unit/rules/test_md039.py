@@ -169,3 +169,71 @@ class TestMD039:
         violations = rule.check(doc, config)
 
         assert len(violations) == 2  # Leading and trailing
+
+    def test_fix_corrects_invalid(self, rule: MD039, config: MD039Config) -> None:
+        """Fixing invalid content strips spaces from link text."""
+        content = load_fixture("md039", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD039, config: MD039Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md039", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_leading_space(self, rule: MD039, config: MD039Config) -> None:
+        """Fix strips leading space from link text."""
+        content = "[ link text](https://example.com/)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "[link text](https://example.com/)"
+
+    def test_fix_trailing_space(self, rule: MD039, config: MD039Config) -> None:
+        """Fix strips trailing space from link text."""
+        content = "[link text ](https://example.com/)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "[link text](https://example.com/)"
+
+    def test_fix_both_sides(self, rule: MD039, config: MD039Config) -> None:
+        """Fix strips spaces from both sides of link text."""
+        content = "[ link text ](https://example.com/)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "[link text](https://example.com/)"
+
+    def test_fix_multiple_spaces(self, rule: MD039, config: MD039Config) -> None:
+        """Fix strips multiple spaces from link text."""
+        content = "[   multiple spaces   ](https://example.com/)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "[multiple spaces](https://example.com/)"
+
+    def test_fix_multiple_links_on_same_line(self, rule: MD039, config: MD039Config) -> None:
+        """Fix handles multiple links on the same line."""
+        content = "[ first ](https://first.com/) and [ second ](https://second.com/)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "[first](https://first.com/) and [second](https://second.com/)"
+
+    def test_fix_does_not_alter_images(self, rule: MD039, config: MD039Config) -> None:
+        """Fix does not modify image alt text."""
+        content = "![ image alt ](image.png)"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_reference_links(self, rule: MD039, config: MD039Config) -> None:
+        """Fix handles reference style links."""
+        content = "[ link text ][ref]\n\n[ref]: https://example.com"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "[link text]" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

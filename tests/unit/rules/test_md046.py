@@ -134,6 +134,17 @@ class TestMD046:
         assert "expected indented" in violations[0].message
         assert "found fenced" in violations[0].message
 
+    def test_consistent_mode_mixed_styles(self, rule: MD046) -> None:
+        """Consistent mode with mixed styles reports violations."""
+        config = MD046Config(style="consistent")
+        content = load_fixture("md046", "invalid.md")
+        doc = Document(Path("invalid.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 1
+        assert "expected fenced" in violations[0].message
+
     def test_fenced_code_block_in_list(self, rule: MD046) -> None:
         """Fenced code block inside a list item should not trigger false positive."""
         config = MD046Config(style="consistent")
@@ -143,3 +154,105 @@ class TestMD046:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD046Fix:
+    @pytest.fixture
+    def rule(self) -> MD046:
+        return MD046()
+
+    @pytest.fixture
+    def config(self) -> MD046Config:
+        return MD046Config()
+
+    def test_fix_converts_indented_to_fenced(self, rule: MD046, config: MD046Config) -> None:
+        """Fix converts indented code blocks to fenced (default style)."""
+        content = load_fixture("md046", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid_fenced(self, rule: MD046, config: MD046Config) -> None:
+        """Fix returns None when all code blocks already use fenced style."""
+        content = load_fixture("md046", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_returns_none_for_no_code_blocks(self, rule: MD046, config: MD046Config) -> None:
+        """Fix returns None when there are no code blocks."""
+        content = load_fixture("md046", "no_code.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_converts_fenced_to_indented(self, rule: MD046) -> None:
+        """Fix converts fenced code blocks to indented style."""
+        config = MD046Config(style="indented")
+        content = load_fixture("md046", "fenced_only.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid_indented(self, rule: MD046) -> None:
+        """Fix returns None when all code blocks already use indented style."""
+        config = MD046Config(style="indented")
+        content = load_fixture("md046", "indented_only.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_consistent_mode_fenced_first(self, rule: MD046) -> None:
+        """Fix in consistent mode converts to match first style (fenced)."""
+        config = MD046Config(style="consistent")
+        content = load_fixture("md046", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_consistent_mode_indented_first(self, rule: MD046) -> None:
+        """Fix in consistent mode converts to match first style (indented)."""
+        config = MD046Config(style="consistent")
+        content = load_fixture("md046", "indented_then_fenced.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_all_indented_to_fenced(self, rule: MD046, config: MD046Config) -> None:
+        """Fix converts all indented blocks when style is fenced."""
+        content = load_fixture("md046", "indented_only.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_preserves_code_content(self, rule: MD046, config: MD046Config) -> None:
+        """Fix preserves the actual code content when converting."""
+        content = "# Test\n\n    print('hello')\n    print('world')\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "print('hello')" in result
+        assert "print('world')" in result
+
+    def test_fix_skips_list_context_fenced_blocks(self, rule: MD046) -> None:
+        """Fix skips fenced blocks inside lists when converting to indented."""
+        config = MD046Config(style="indented")
+        content = load_fixture("md046", "fenced_in_list.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        # Fenced blocks in list context are skipped, nothing to fix
+        assert result is None
+
+    def test_fixable_property(self, rule: MD046) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

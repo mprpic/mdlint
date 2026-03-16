@@ -109,3 +109,51 @@ class TestMD023:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD023, config: MD023Config) -> None:
+        """Fix removes leading whitespace from indented headings."""
+        content = load_fixture("md023", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD023, config: MD023Config) -> None:
+        """Fix returns None when no headings need fixing."""
+        content = load_fixture("md023", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_code_blocks(self, rule: MD023, config: MD023Config) -> None:
+        """Fix does not modify indented lines inside code blocks."""
+        content = load_fixture("md023", "code_blocks.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_list_items(self, rule: MD023, config: MD023Config) -> None:
+        """Fix does not modify headings inside list items."""
+        content = load_fixture("md023", "list_items.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_mixed_valid_invalid(self, rule: MD023, config: MD023Config) -> None:
+        """Fix only strips indentation from invalid headings."""
+        content = "# Valid\n\n  ## Invalid\n\n### Also Valid\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Valid\n\n## Invalid\n\n### Also Valid\n"
+
+    def test_fix_setext_heading(self, rule: MD023, config: MD023Config) -> None:
+        """Fix strips indentation from setext-style headings."""
+        content = "  Setext Heading\n================\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Setext Heading\n================\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

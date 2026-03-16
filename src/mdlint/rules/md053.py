@@ -86,21 +86,19 @@ Here is a [used link][example].
         re.compile(r"!\[([^\]]+)\](?!\[|\()"),  # Image shortcut: ![alt]
     ]
 
-    def check(self, document: Document, config: MD053Config) -> list[Violation]:
-        """Check for unused or duplicate link/image reference definitions."""
-        violations: list[Violation] = []
+    def _parse_definitions_and_references(
+        self, document: Document, config: MD053Config
+    ) -> tuple[dict[str, list[int]], set[str]]:
+        """Parse reference definitions and collect referenced labels.
 
-        # Get lines that are inside code blocks or HTML blocks
-        excluded_lines = self._get_code_block_lines(document) | self._get_html_block_lines(document)
-
-        # Get inline code span positions per line
-        code_span_positions = self._get_code_span_positions(document)
-
-        # Build set of ignored labels (lowercase for case-insensitive matching)
+        Returns (definitions, references) where definitions maps lowercase labels
+        to lists of line numbers, and references is a set of lowercase labels used.
+        """
+        excluded_lines = document.code_block_lines | document.html_block_lines
+        code_span_positions = document.code_span_positions
         ignored = {label.lower() for label in config.ignored_definitions}
 
-        # Parse all reference definitions and collect all referenced labels in a single pass
-        definitions: dict[str, list[int]] = {}  # label -> list of line numbers
+        definitions: dict[str, list[int]] = {}
         references: set[str] = set()
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in excluded_lines:
@@ -109,23 +107,28 @@ Here is a [used link][example].
             match = self.REFERENCE_DEF_PATTERN.match(line)
             if match:
                 label = match.group(1).lower()
-                definitions.setdefault(label, []).append(line_num)
+                if label not in ignored:
+                    definitions.setdefault(label, []).append(line_num)
                 continue
 
-            # Collect reference usages from non-definition lines
+            if "[" not in line:
+                continue
+
             line_code_cols = code_span_positions.get(line_num, set())
             for pattern in self.REFERENCE_USE_PATTERNS:
                 for ref_match in pattern.finditer(line):
                     if ref_match.start() + 1 not in line_code_cols:
                         references.add(ref_match.group(1).lower())
 
-        # Check for unused definitions
-        for label, line_nums in definitions.items():
-            if label in ignored:
-                continue
+        return definitions, references
 
+    def check(self, document: Document, config: MD053Config) -> list[Violation]:
+        """Check for unused or duplicate link/image reference definitions."""
+        violations: list[Violation] = []
+        definitions, references = self._parse_definitions_and_references(document, config)
+
+        for label, line_nums in definitions.items():
             if label not in references:
-                # First definition is unused
                 line_num = line_nums[0]
                 violations.append(
                     Violation(
@@ -138,7 +141,6 @@ Here is a [used link][example].
                     )
                 )
 
-            # Check for duplicate definitions (after the first)
             for dup_line_num in line_nums[1:]:
                 violations.append(
                     Violation(
@@ -152,3 +154,37 @@ Here is a [used link][example].
                 )
 
         return violations
+
+    def fix(self, document: Document, config: MD053Config) -> str | None:
+        """Fix by removing unused and duplicate reference definitions."""
+        definitions, references = self._parse_definitions_and_references(document, config)
+
+        lines_to_remove: set[int] = set()
+        for label, line_nums in definitions.items():
+            if label not in references:
+                lines_to_remove.update(line_nums)
+            else:
+                for dup_line_num in line_nums[1:]:
+                    lines_to_remove.add(dup_line_num)
+
+        if not lines_to_remove:
+            return None
+
+        # Remove flagged lines and collapse consecutive blank lines only
+        # when the removal created them (not pre-existing ones)
+        lines = document.content.split("\n")
+        result: list[str] = []
+        prev_blank = False
+        just_removed = False
+        for line_num, line in enumerate(lines, start=1):
+            if line_num in lines_to_remove:
+                just_removed = True
+                continue
+            is_blank = line.strip() == ""
+            if is_blank and prev_blank and just_removed:
+                continue
+            result.append(line)
+            prev_blank = is_blank
+            just_removed = False
+
+        return "\n".join(result)

@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from mdlint.document import Document
@@ -59,49 +60,76 @@ Here is (another bad link)[https://example.org/page] in a sentence.
     # - Does not match footnote references [^...] or if followed by (
     REVERSED_LINK_PATTERN = re.compile(r"(^|[^\\])\(([^()]+)\)\[([^]^][^]]*)](?!\()")
 
-    def check(self, document: Document, config: MD011Config) -> list[Violation]:
-        """Check for reversed link syntax."""
-        violations: list[Violation] = []
+    def _find_reversed_links(
+        self, document: Document
+    ) -> Iterator[tuple[int, re.Match[str], str, str, str, int]]:
+        """Yield reversed link matches with metadata.
 
-        # Build set of line numbers inside code blocks (fenced and indented)
-        code_block_lines = self._get_code_block_lines(document)
-
-        # Build map of inline code column ranges per line
-        inline_code_columns = self._get_code_span_positions(document)
+        Yields tuples of (line_num, match, pre_char, link_text, link_dest, column).
+        """
+        code_block_lines = document.code_block_lines
+        inline_code_columns = document.code_span_positions
 
         for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines in code blocks
             if line_num in code_block_lines:
                 continue
 
-            # Find all reversed links on this line
+            if ")[" not in line:
+                continue
+
             for match in self.REVERSED_LINK_PATTERN.finditer(line):
                 pre_char = match.group(1)
                 link_text = match.group(2)
                 link_dest = match.group(3)
 
-                # Skip if link text or destination ends with backslash
                 if link_text.endswith("\\") or link_dest.endswith("\\"):
                     continue
 
-                # Calculate column position (1-indexed)
                 column = match.start() + len(pre_char) + 1
-
-                # Check if this match is inside an inline code span
                 code_cols = inline_code_columns.get(line_num, set())
                 if code_cols and column in code_cols:
                     continue
 
-                reversed_link = match.group(0)[len(pre_char) :]
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=column,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=f"Reversed link syntax: {reversed_link}",
-                        context=document.get_line(line_num),
-                    )
+                yield line_num, match, pre_char, link_text, link_dest, column
+
+    def check(self, document: Document, config: MD011Config) -> list[Violation]:
+        """Check for reversed link syntax."""
+        violations: list[Violation] = []
+
+        for line_num, match, pre_char, _, _, column in self._find_reversed_links(document):
+            reversed_link = match.group(0)[len(pre_char) :]
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=column,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=f"Reversed link syntax: {reversed_link}",
+                    context=document.get_line(line_num),
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD011Config) -> str | None:
+        """Fix reversed link syntax by swapping (text)[url] to [text](url)."""
+        # Group matches by line number, collecting in reverse order per line
+        matches_by_line: dict[int, list[tuple[re.Match[str], str, str, str]]] = {}
+        for line_num, match, pre_char, link_text, link_dest, _ in self._find_reversed_links(
+            document
+        ):
+            matches_by_line.setdefault(line_num, []).append((match, pre_char, link_text, link_dest))
+
+        if not matches_by_line:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, line_matches in matches_by_line.items():
+            line = lines[line_num - 1]
+            # Process in reverse order to preserve column positions
+            for match, pre_char, link_text, link_dest in reversed(line_matches):
+                start = match.start() + len(pre_char)
+                line = line[:start] + f"[{link_text}]({link_dest})" + line[match.end() :]
+            lines[line_num - 1] = line
+
+        return "\n".join(lines)

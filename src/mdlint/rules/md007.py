@@ -150,3 +150,65 @@ class MD007(Rule[MD007Config]):
                     )
 
         return violations
+
+    def fix(self, document: Document, config: MD007Config) -> str | None:
+        """Fix unordered list indentation violations."""
+        indent = config.indent
+        start_indented = config.start_indented
+        start_indent: int = config.start_indent  # type: ignore[assignment]
+
+        list_stack: list[str] = []
+        blockquote_depth = 0
+        # (line_0indexed, prefix_len, expected_indent)
+        adjustments: list[tuple[int, int, int]] = []
+
+        for token in document.tokens:
+            if token.type == "blockquote_open":
+                blockquote_depth += 1
+            elif token.type == "blockquote_close":
+                blockquote_depth -= 1
+            elif token.type == "bullet_list_open":
+                list_stack.append("bullet")
+            elif token.type == "ordered_list_open":
+                list_stack.append("ordered")
+            elif token.type in ("bullet_list_close", "ordered_list_close"):
+                if list_stack:
+                    list_stack.pop()
+            elif token.type == "list_item_open" and token.map:
+                if not list_stack or list_stack[-1] != "bullet":
+                    continue
+                if "ordered" in list_stack:
+                    continue
+
+                line_num = token.map[0] + 1
+                line_content = document.get_line(line_num)
+                if line_content is None:
+                    continue
+
+                prefix_len = 0
+                check_content = line_content
+                if blockquote_depth > 0:
+                    match = self.BLOCKQUOTE_PREFIX_RE.match(line_content)
+                    if match:
+                        prefix_len = match.end()
+                        check_content = line_content[prefix_len:]
+
+                actual_indent = len(check_content) - len(check_content.lstrip())
+                nesting_level = len(list_stack) - 1
+                base = start_indent if start_indented else 0
+                expected_indent = base + nesting_level * indent
+
+                if actual_indent != expected_indent:
+                    adjustments.append((token.map[0], prefix_len, expected_indent))
+
+        if not adjustments:
+            return None
+
+        lines = document.content.split("\n")
+        for line_idx, prefix_len, expected in adjustments:
+            line = lines[line_idx]
+            prefix = line[:prefix_len]
+            rest = line[prefix_len:].lstrip()
+            lines[line_idx] = prefix + " " * expected + rest
+
+        return "\n".join(lines)

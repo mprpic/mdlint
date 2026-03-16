@@ -222,3 +222,70 @@ class TestMD038:
 
         assert len(violations) == 1
         assert "trailing" in violations[0].message.lower()
+
+    def test_fix_corrects_invalid(self, rule: MD038, config: MD038Config) -> None:
+        """Fixing invalid content removes spaces from code spans."""
+        content = load_fixture("md038", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD038, config: MD038Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md038", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_leading_space(self, rule: MD038, config: MD038Config) -> None:
+        """Fix removes leading space from code span."""
+        content = "Text with ` code` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with `code` here."
+
+    def test_fix_trailing_space(self, rule: MD038, config: MD038Config) -> None:
+        """Fix removes trailing space from code span."""
+        content = "Text with `code ` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with `code` here."
+
+    def test_fix_both_sides_with_padding(self, rule: MD038, config: MD038Config) -> None:
+        """Fix removes extra spaces but preserves symmetric padding."""
+        content = "Text with `  code  ` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with ` code ` here."
+
+    def test_fix_multiple_code_spans(self, rule: MD038, config: MD038Config) -> None:
+        """Fix handles multiple code spans on same line."""
+        content = "Both `  bad  ` and `  also bad  ` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_skips_code_blocks(self, rule: MD038, config: MD038Config) -> None:
+        """Fix does not modify content inside code blocks."""
+        content = "```\n` leading space`\n```"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_whitespace_only_unchanged(self, rule: MD038, config: MD038Config) -> None:
+        """Fix does not modify code spans containing only whitespace."""
+        content = "Text with `   ` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_tabs(self, rule: MD038, config: MD038Config) -> None:
+        """Fix removes tab whitespace from code spans."""
+        content = "Text with `\tcode\t` here."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with `code` here."

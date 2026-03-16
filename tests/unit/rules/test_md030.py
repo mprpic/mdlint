@@ -187,3 +187,63 @@ class TestMD030:
 
         # Blockquoted list lines start with "> " so the regex doesn't match
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD030, config: MD030Config) -> None:
+        """Fix adjusts spaces after list markers to match expected count."""
+        content = load_fixture("md030", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD030, config: MD030Config) -> None:
+        """Fix returns None when document is already valid."""
+        content = load_fixture("md030", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_star_marker(self, rule: MD030, config: MD030Config) -> None:
+        """Fix works with * markers."""
+        content = load_fixture("md030", "star_marker.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_plus_marker(self, rule: MD030, config: MD030Config) -> None:
+        """Fix works with + markers."""
+        content = load_fixture("md030", "plus_marker.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_nested_multi_paragraph(self, rule: MD030) -> None:
+        """Fix adjusts spacing for multi-paragraph lists."""
+        content = load_fixture("md030", "nested_multi_paragraph_invalid.md")
+        doc = Document(Path("test.md"), content)
+        config = MD030Config(ul_multi=3)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_no_lists(self, rule: MD030, config: MD030Config) -> None:
+        """Fix returns None for document without lists."""
+        content = load_fixture("md030", "no_lists.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multi_digit_ordered(self, rule: MD030, config: MD030Config) -> None:
+        """Fix works with multi-digit ordered list markers."""
+        content = load_fixture("md030", "multi_digit_ordered.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

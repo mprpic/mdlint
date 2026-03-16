@@ -52,9 +52,9 @@ Headings with multiple spaces after hash.
     # Pattern to match ATX heading with multiple spaces after hash
     MULTIPLE_SPACES_PATTERN = re.compile(r"^(#{1,6})\s{2,}")
 
-    def check(self, document: Document, config: MD019Config) -> list[Violation]:
-        """Check for multiple spaces after hash in ATX headings."""
-        violations: list[Violation] = []
+    def _find_multiple_space_lines(self, document: Document) -> list[tuple[int, re.Match[str]]]:
+        """Return list of (line_num, match) for headings with multiple spaces after hash."""
+        results: list[tuple[int, re.Match[str]]] = []
 
         for token in document.tokens:
             if token.type != "heading_open":
@@ -67,16 +67,41 @@ Headings with multiple spaces after hash.
             line = token.map[0] + 1 if token.map else 1
             raw_line = document.get_line(line)
 
-            if raw_line and self.MULTIPLE_SPACES_PATTERN.match(raw_line):
-                violations.append(
-                    Violation(
-                        line=line,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message="Multiple spaces after hash on ATX style heading",
-                        context=raw_line,
-                    )
+            if raw_line:
+                match = self.MULTIPLE_SPACES_PATTERN.match(raw_line)
+                if match:
+                    results.append((line, match))
+
+        return results
+
+    def check(self, document: Document, config: MD019Config) -> list[Violation]:
+        """Check for multiple spaces after hash in ATX headings."""
+        violations: list[Violation] = []
+
+        for line_num, _ in self._find_multiple_space_lines(document):
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message="Multiple spaces after hash on ATX style heading",
+                    context=document.get_line(line_num),
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD019Config) -> str | None:
+        """Fix multiple spaces after hash by collapsing to a single space."""
+        matching_lines = self._find_multiple_space_lines(document)
+        if not matching_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, match in matching_lines:
+            hashes = match.group(1)
+            rest = lines[line_num - 1][match.end() :]
+            lines[line_num - 1] = hashes + " " + rest
+
+        return "\n".join(lines)

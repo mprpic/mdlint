@@ -42,39 +42,75 @@ class MD010(Rule[MD010Config]):
         "creating formatting problems across platforms."
     )
 
-    def check(self, document: Document, config: MD010Config) -> list[Violation]:
-        """Check for hard tab characters."""
-        violations: list[Violation] = []
-
-        # Build sets of lines/columns to skip when code is excluded
+    def _get_tab_positions(
+        self, document: Document, config: MD010Config
+    ) -> list[tuple[int, list[int]]]:
+        """Return list of (line_num, tab_columns) for lines with violating tabs."""
         code_block_lines: set[int] = set()
         code_span_positions: dict[int, set[int]] = {}
         if not config.code_blocks:
-            code_block_lines = self._get_code_block_lines(document)
-            code_span_positions = self._get_code_span_positions(document)
+            code_block_lines = document.code_block_lines
+            code_span_positions = document.code_span_positions
 
-        # Check each line for tab characters
+        results: list[tuple[int, list[int]]] = []
         for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines in code blocks if configured to ignore them
             if line_num in code_block_lines:
+                continue
+
+            if "\t" not in line:
                 continue
 
             skip_columns = code_span_positions.get(line_num, set())
 
-            # Find all tab characters in the line
+            columns: list[int] = []
             column = 0
             for char in line:
                 column += 1
                 if char == "\t" and column not in skip_columns:
-                    violations.append(
-                        Violation(
-                            line=line_num,
-                            column=column,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message="Hard tab character found",
-                            context=document.get_line(line_num),
-                        )
+                    columns.append(column)
+
+            if columns:
+                results.append((line_num, columns))
+
+        return results
+
+    def check(self, document: Document, config: MD010Config) -> list[Violation]:
+        """Check for hard tab characters."""
+        violations: list[Violation] = []
+
+        for line_num, columns in self._get_tab_positions(document, config):
+            for column in columns:
+                violations.append(
+                    Violation(
+                        line=line_num,
+                        column=column,
+                        rule_id=self.id,
+                        rule_name=self.name,
+                        message="Hard tab character found",
+                        context=document.get_line(line_num),
                     )
+                )
 
         return violations
+
+    def fix(self, document: Document, config: MD010Config) -> str | None:
+        """Fix hard tabs by replacing them with spaces."""
+        tab_positions = self._get_tab_positions(document, config)
+        if not tab_positions:
+            return None
+
+        tab_columns_by_line = {line_num: set(columns) for line_num, columns in tab_positions}
+        lines = document.content.split("\n")
+        for line_num, tab_columns in tab_columns_by_line.items():
+            line = lines[line_num - 1]
+            new_line = []
+            column = 0
+            for char in line:
+                column += 1
+                if char == "\t" and column in tab_columns:
+                    new_line.append("    ")
+                else:
+                    new_line.append(char)
+            lines[line_num - 1] = "".join(new_line)
+
+        return "\n".join(lines)

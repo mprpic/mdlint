@@ -147,3 +147,65 @@ class TestMD021:
         violations = rule.check(doc, config)
 
         assert len(violations) == 1
+
+    def test_fix_corrects_invalid(self, rule: MD021, config: MD021Config) -> None:
+        """Fixing invalid content produces valid output with no violations."""
+        content = load_fixture("md021", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # Verify headings were fixed to single spaces
+        assert "# Heading 1 #" in result
+        assert "## Heading 2 ##" in result
+        assert "### Heading 3 ###" in result
+
+    def test_fix_returns_none_for_valid(self, rule: MD021, config: MD021Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md021", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_left_only(self, rule: MD021, config: MD021Config) -> None:
+        """Fix collapses multiple spaces after opening hashes."""
+        content = load_fixture("md021", "multiple_left_only.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_right_only(self, rule: MD021, config: MD021Config) -> None:
+        """Fix collapses multiple spaces before closing hashes."""
+        content = load_fixture("md021", "multiple_right_only.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_mismatched_hashes(self, rule: MD021, config: MD021Config) -> None:
+        """Fix handles mismatched opening/closing hash counts."""
+        content = load_fixture("md021", "mismatched_hashes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_regular_atx_returns_none(self, rule: MD021, config: MD021Config) -> None:
+        """Regular ATX headings without closing hashes return None."""
+        content = load_fixture("md021", "regular_atx.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_tab_spacing(self, rule: MD021, config: MD021Config) -> None:
+        """Fix collapses tabs to single space."""
+        content = "#\t\tHeading\t\t#\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Heading #\n"

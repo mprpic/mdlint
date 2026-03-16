@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from mdlint.document import Document
@@ -71,12 +72,16 @@ We also use github and python with improper capitalization.
 - python is powerful
 """
 
-    def check(self, document: Document, config: MD044Config) -> list[Violation]:
-        """Check for proper-names violations."""
-        violations: list[Violation] = []
+    def _find_name_mismatches(
+        self, document: Document, config: MD044Config
+    ) -> Iterator[tuple[int, int, str, str]]:
+        """Yield name capitalization mismatches.
 
+        Yields tuples of (line_num, column, expected_name, found_name) where
+        column is 1-indexed.
+        """
         if not config.names:
-            return violations
+            return
 
         # Sort names by length (longest first) to match longer names before shorter ones
         names = sorted(config.names, key=lambda x: (-len(x), x))
@@ -153,7 +158,7 @@ We also use github and python with improper capitalization.
         # Build inline code exclusion when code_blocks is disabled
         code_span_positions: dict[int, set[int]] = {}
         if not config.code_blocks:
-            code_span_positions = self._get_code_span_positions(document)
+            code_span_positions = document.code_span_positions
 
         # Scan each scannable line for name violations
         matched_ranges: dict[int, list[tuple[int, int]]] = {}
@@ -185,19 +190,43 @@ We also use github and python with improper capitalization.
                     if not config.code_blocks and column in line_code_cols:
                         continue
 
-                    violations.append(
-                        Violation(
-                            line=line_num,
-                            column=column,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=f"Expected '{name}' but found '{matched_name}'",
-                            context=line,
-                        )
-                    )
+                    yield line_num, column, name, matched_name
                     line_matched.append((column, column + len(matched_name)))
 
-        return violations
+    def check(self, document: Document, config: MD044Config) -> list[Violation]:
+        """Check for proper-names violations."""
+        return [
+            Violation(
+                line=line_num,
+                column=column,
+                rule_id=self.id,
+                rule_name=self.name,
+                message=f"Expected '{expected}' but found '{found}'",
+                context=document.get_line(line_num),
+            )
+            for line_num, column, expected, found in self._find_name_mismatches(document, config)
+        ]
+
+    def fix(self, document: Document, config: MD044Config) -> str | None:
+        """Fix proper-name capitalization violations."""
+        matches_by_line: dict[int, list[tuple[int, str, str]]] = {}
+        for line_num, column, expected, found in self._find_name_mismatches(document, config):
+            matches_by_line.setdefault(line_num, []).append((column, expected, found))
+
+        if not matches_by_line:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, replacements in matches_by_line.items():
+            line = lines[line_num - 1]
+            # Process right-to-left to preserve column positions
+            for col, expected, found in sorted(replacements, key=lambda r: r[0], reverse=True):
+                idx = col - 1  # 0-indexed
+                if line[idx : idx + len(found)] == found:
+                    line = line[:idx] + expected + line[idx + len(found) :]
+            lines[line_num - 1] = line
+
+        return "\n".join(lines)
 
     @staticmethod
     def _in_exclusion_range(column: int, ranges: list[tuple[int, int]]) -> bool:

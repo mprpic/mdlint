@@ -240,3 +240,71 @@ class TestMD058:
         assert len(violations) == 1
         assert violations[0].line == 4
         assert "preceded" in violations[0].message.lower()
+
+    def test_fix_corrects_invalid(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank lines around tables in invalid document."""
+        content = load_fixture("md058", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD058, config: MD058Config) -> None:
+        """Fix returns None when document is already valid."""
+        content = load_fixture("md058", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_missing_blank_above(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank line above table."""
+        content = "Some text.\n| A | B |\n|---|---|\n| 1 | 2 |\n\nMore text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Some text.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nMore text.\n"
+
+    def test_fix_missing_blank_below(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank line below table."""
+        content = "Some text.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n> Quote\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "Some text.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> Quote\n"
+
+    def test_fix_multiple_tables(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank lines around multiple tables."""
+        content = (
+            "Text.\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+            "> Quote\n\n| C | D |\n|---|---|\n| 3 | 4 |\n> End.\n"
+        )
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_table_at_start_and_end(self, rule: MD058, config: MD058Config) -> None:
+        """Fix returns None for table at start/end of document (no blank lines needed)."""
+        content = "| A | B |\n|---|---|\n| 1 | 2 |\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_table_after_heading(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank line between heading and table."""
+        content = "# Heading\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# Heading\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+
+    def test_fix_back_to_back_tables_with_heading(self, rule: MD058, config: MD058Config) -> None:
+        """Fix inserts blank lines around tables separated by heading."""
+        content = "| A | B |\n|---|---|\n| 1 | 2 |\n# Heading\n| C | D |\n|---|---|\n| 3 | 4 |\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

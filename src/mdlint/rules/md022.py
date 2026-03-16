@@ -117,6 +117,63 @@ Some more text.
 
         return violations
 
+    def fix(self, document: Document, config: MD022Config) -> str | None:
+        """Fix blanks-around-headings violations by inserting missing blank lines."""
+        lines_above = config.lines_above
+        lines_below = config.lines_below
+
+        if lines_above <= 0 and lines_below <= 0:
+            return None
+
+        # Collect heading info: list of (start_line_0indexed, end_line_0indexed_exclusive)
+        headings: list[tuple[int, int]] = []
+        for token in document.tokens:
+            if token.type == "heading_open" and token.map:
+                headings.append((token.map[0], token.map[1]))
+
+        if not headings:
+            return None
+
+        lines = document.content.split("\n")
+        num_doc_lines = len(document.lines)
+        changed = False
+
+        # Process headings from bottom to top so insertions don't shift indices
+        for heading_start, heading_end in reversed(headings):
+            # heading_start is 0-indexed line of the heading
+            # heading_end is 0-indexed exclusive end (first line after heading)
+
+            # Fix blank lines below
+            if lines_below > 0 and heading_end < num_doc_lines:
+                existing_below = 0
+                idx = heading_end
+                while idx < num_doc_lines and lines[idx].strip() == "":
+                    existing_below += 1
+                    idx += 1
+                if existing_below < lines_below:
+                    blanks_to_add = lines_below - existing_below
+                    for _ in range(blanks_to_add):
+                        lines.insert(heading_end, "")
+                    changed = True
+
+            # Fix blank lines above
+            if lines_above > 0 and heading_start > 0:
+                existing_above = 0
+                idx = heading_start - 1
+                while idx >= 0 and lines[idx].strip() == "":
+                    existing_above += 1
+                    idx -= 1
+                if existing_above < lines_above:
+                    blanks_to_add = lines_above - existing_above
+                    for _ in range(blanks_to_add):
+                        lines.insert(heading_start, "")
+                    changed = True
+
+        if not changed:
+            return None
+
+        return "\n".join(lines)
+
     @staticmethod
     def _count_blank_lines_above(document: Document, heading_line: int) -> int:
         """Count consecutive blank lines immediately above a heading.

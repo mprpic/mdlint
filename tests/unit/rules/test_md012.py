@@ -177,3 +177,78 @@ class TestMD012:
 
         assert len(violations) == 1
         assert violations[0].line == 5
+
+    def test_fix_corrects_invalid(self, rule: MD012, config: MD012Config) -> None:
+        """Fixing invalid content removes extra blank lines."""
+        content = load_fixture("md012", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD012, config: MD012Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md012", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_groups(self, rule: MD012, config: MD012Config) -> None:
+        """Fix collapses multiple separate groups of blank lines."""
+        content = "# Heading\n\n\nPara 1\n\n\nPara 2\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\nPara 1\n\nPara 2\n"
+
+    def test_fix_many_consecutive_blanks(self, rule: MD012, config: MD012Config) -> None:
+        """Fix collapses many consecutive blank lines to one."""
+        content = "# Heading\n\n\n\nText\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\nText\n"
+
+    def test_fix_preserves_code_blocks(self, rule: MD012, config: MD012Config) -> None:
+        """Fix does not modify blank lines inside code blocks."""
+        content = load_fixture("md012", "code_block_valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_front_matter(self, rule: MD012, config: MD012Config) -> None:
+        """Fix does not modify blank lines inside front matter."""
+        content = "---\nkey: value\n\n\nanother: value\n---\n\n# Heading\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_with_maximum_two(self, rule: MD012) -> None:
+        """Fix respects the maximum config setting."""
+        config = MD012Config(maximum=2)
+        content = "# Heading\n\n\n\nText\n"  # Three blank lines
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\n\nText\n"
+
+    def test_fix_at_start_of_document(self, rule: MD012, config: MD012Config) -> None:
+        """Fix handles extra blank lines at the start of the document."""
+        content = "\n\n# Heading\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "\n# Heading\n"
+
+    def test_fix_at_end_of_document(self, rule: MD012, config: MD012Config) -> None:
+        """Fix handles extra blank lines at the end of the document."""
+        content = "# Heading\n\n\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Heading\n\n"
+
+    def test_fix_whitespace_only_lines(self, rule: MD012, config: MD012Config) -> None:
+        """Fix removes whitespace-only lines that exceed the maximum."""
+        content = "# Heading\n \n   \nText\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

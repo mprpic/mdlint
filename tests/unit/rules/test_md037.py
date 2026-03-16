@@ -230,3 +230,91 @@ Regular text here.
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD037, config: MD037Config) -> None:
+        """Fixing invalid content removes spaces inside emphasis markers."""
+        content = load_fixture("md037", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD037, config: MD037Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md037", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_strips_leading_space(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips leading space from emphasis."""
+        content = "Text with ** bold** words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with **bold** words"
+
+    def test_fix_strips_trailing_space(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips trailing space from emphasis."""
+        content = "Text with **bold ** words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with **bold** words"
+
+    def test_fix_strips_both_sides(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips spaces on both sides of emphasis."""
+        content = "Text with ** bold ** words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with **bold** words"
+
+    def test_fix_single_asterisk_italic(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips spaces inside single asterisks."""
+        content = "Text with * italic * words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with *italic* words"
+
+    def test_fix_underscore_emphasis(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips spaces inside underscore emphasis."""
+        content = "Text with __ bold __ and _ italic _."
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with __bold__ and _italic_."
+
+    def test_fix_triple_asterisks(self, rule: MD037, config: MD037Config) -> None:
+        """Fix strips spaces inside triple asterisks."""
+        content = "Text with *** bold italic *** words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with ***bold italic*** words"
+
+    def test_fix_multiple_on_same_line(self, rule: MD037, config: MD037Config) -> None:
+        """Fix handles multiple violations on the same line."""
+        content = "Text with ** bold ** and * italic * words"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Text with **bold** and *italic* words"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_preserves_code_blocks(self, rule: MD037, config: MD037Config) -> None:
+        """Fix does not modify content inside code blocks."""
+        content = """\
+# Heading
+
+```
+This ** is not ** emphasis in a code block
+```
+
+Regular text here.
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_empty_document(self, rule: MD037, config: MD037Config) -> None:
+        """Fix returns None for empty document."""
+        doc = Document(Path("empty.md"), "")
+        result = rule.fix(doc, config)
+        assert result is None

@@ -144,3 +144,65 @@ class TestMD028:
 
         assert len(violations) == 1
         assert violations[0].line == 4
+
+    def test_fix_corrects_invalid(self, rule: MD028, config: MD028Config) -> None:
+        """Fix adds > to blank lines between blockquotes."""
+        content = load_fixture("md028", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD028, config: MD028Config) -> None:
+        """Fix returns None for already valid content."""
+        content = load_fixture("md028", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_blank_lines(self, rule: MD028, config: MD028Config) -> None:
+        """Fix handles multiple blank lines between blockquotes."""
+        content = "> First blockquote\n\n\n> Second blockquote\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "> First blockquote\n>\n>\n> Second blockquote\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_separate_violations(self, rule: MD028, config: MD028Config) -> None:
+        """Fix handles multiple separate blank line violations."""
+        content = "> Quote 1\n\n> Quote 2\n\n> Quote 3\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "> Quote 1\n>\n> Quote 2\n>\n> Quote 3\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_list_blockquotes(self, rule: MD028, config: MD028Config) -> None:
+        """Fix preserves indentation for blockquotes inside list items."""
+        content = load_fixture("md028", "list_blockquotes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # Verify indentation is preserved
+        fixed_lines = result.split("\n")
+        assert fixed_lines[3] == "  >"
+
+    def test_fix_continued_blockquote_returns_none(self, rule: MD028, config: MD028Config) -> None:
+        """Fix returns None for blockquotes already using > on blank lines."""
+        content = load_fixture("md028", "continued_blockquote.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_no_blockquotes(self, rule: MD028, config: MD028Config) -> None:
+        """Fix returns None when there are no blockquotes."""
+        content = "# Heading\n\nSome text here.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

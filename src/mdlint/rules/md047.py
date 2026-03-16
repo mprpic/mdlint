@@ -62,3 +62,12 @@ class MD047(Rule[MD047Config]):
             )
 
         return violations
+
+    def fix(self, document: Document, config: MD047Config) -> str | None:
+        """Fix missing trailing newline by appending one."""
+        content = document.content
+
+        if not content or content.endswith("\n"):
+            return None
+
+        return content + "\n"

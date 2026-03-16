@@ -315,3 +315,111 @@ A [example] link and another [example] link.
         config = MD053Config()
 
         assert config.ignored_definitions == ["//"]
+
+    def test_fix_removes_unused_and_duplicate(self, rule: MD053, config: MD053Config) -> None:
+        """Fix removes unused and duplicate reference definitions."""
+        content = load_fixture("md053", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # The used definition should remain
+        assert "[example]: https://example.com" in result
+        # Unused and duplicate definitions should be gone
+        assert "[unused]:" not in result
+        assert "duplicate.example.com" not in result
+
+    def test_fix_returns_none_for_valid(self, rule: MD053, config: MD053Config) -> None:
+        """Fix returns None when document is already valid."""
+        content = load_fixture("md053", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_removes_all_unused_definitions(self, rule: MD053, config: MD053Config) -> None:
+        """Fix removes all unused definitions from document with only definitions."""
+        content = load_fixture("md053", "only_definitions.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_collapses_extra_blank_lines(self, rule: MD053, config: MD053Config) -> None:
+        """Fix collapses extra blank lines left by removed definitions."""
+        content = """\
+# Test
+
+Some text.
+
+[unused]: https://example.com
+
+More text.
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Should not have double blank lines
+        assert "\n\n\n" not in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_preserves_ignored_definitions(self, rule: MD053, config: MD053Config) -> None:
+        """Fix preserves ignored (comment-style) definitions."""
+        content = """\
+# Test
+
+[//]: # (This is a comment)
+
+[unused]: https://example.com
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "[//]: # (This is a comment)" in result
+        assert "[unused]:" not in result
+
+    def test_fix_keeps_first_duplicate(self, rule: MD053, config: MD053Config) -> None:
+        """Fix removes duplicate definitions but keeps the first one."""
+        content = """\
+A [example].
+
+[example]: https://first.example.com
+[example]: https://second.example.com
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "https://first.example.com" in result
+        assert "https://second.example.com" not in result
+
+    def test_fix_does_not_touch_code_blocks(self, rule: MD053, config: MD053Config) -> None:
+        """Fix does not remove definitions inside code blocks."""
+        content = """\
+```
+[example]: https://example.com
+```
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_preexisting_blank_lines(self, rule: MD053, config: MD053Config) -> None:
+        """Fix does not collapse pre-existing consecutive blank lines."""
+        content = """\
+# Test
+
+
+Two blank lines above are pre-existing.
+
+[unused]: https://example.com
+
+More text.
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Pre-existing double blank line should be preserved
+        assert "\n\n\n" in result
+        assert "[unused]:" not in result

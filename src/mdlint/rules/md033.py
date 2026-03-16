@@ -119,10 +119,10 @@ Some text with <span>inline HTML</span> inside.
         )
 
         # Get lines that are inside code blocks (fenced or indented)
-        code_block_lines = self._get_code_block_lines(document)
+        code_block_lines = document.code_block_lines
 
         # Get inline code span positions per line
-        code_span_positions = self._get_code_span_positions(document)
+        code_span_positions = document.code_span_positions
 
         # Get HTML comment positions (handles multi-line comments)
         comment_positions = self._get_html_comment_positions(document)

@@ -171,12 +171,15 @@ class Linter:
                 rule = rule_class()
                 self._rules.append((rule, config))
 
-    def lint_file(self, path: Path, content: str | None = None) -> FileResult:
+    def lint_file(
+        self, path: Path, content: str | None = None, document: Document | None = None
+    ) -> FileResult:
         """Lint a single file.
 
         Args:
             path: File path.
             content: Optional content (if already read, e.g., stdin).
+            document: Optional pre-parsed document to avoid re-parsing.
 
         Returns:
             FileResult with violations or error.
@@ -185,7 +188,9 @@ class Linter:
             if content is None:
                 content = path.read_text(encoding="utf-8")
 
-            document = Document(path, content)
+            if document is None:
+                document = Document(path, content)
+
             violations: list[Violation] = []
 
             for rule, config in self._rules:
@@ -215,8 +220,8 @@ class Linter:
     def fix_file(self, path: Path, content: str | None = None) -> FileResult:
         """Fix and lint a single file.
 
-        Applies fixable rules sequentially, writes back if changed, then lints
-        the (possibly fixed) content.
+        Applies fixable rules sequentially, writes back if changed, then
+        collects remaining violations from all rules.
 
         Args:
             path: File path.
@@ -230,19 +235,50 @@ class Linter:
                 content = path.read_text(encoding="utf-8")
 
             was_fixed = False
+            document = Document(path, content)
+
+            # Cache check() results from the fix loop. When content changes,
+            # the cache is invalidated so only results checked against the
+            # final document are reused in the violation-collection pass below.
+            cached_violations: dict[str, list[Violation]] = {}
+
             for rule, config in self._rules:
                 if not rule.fixable:
                     continue
-                document = Document(path, content)
+
+                violations = rule.check(document, config)
+                cached_violations[rule.id] = violations
+                if not violations:
+                    continue
+
+                # Skip fix if all violations for this rule are suppressed
+                non_suppressed = filter_suppressed(document, violations)
+                if not non_suppressed:
+                    continue
+
                 fixed = rule.fix(document, config)
                 if fixed is not None:
                     content = fixed
+                    document = Document(path, content)
+                    cached_violations.clear()
                     was_fixed = True
 
             if was_fixed and path != Path("<stdin>"):
                 path.write_text(content, encoding="utf-8")
 
-            result = self.lint_file(path, content=content)
+            # Collect final violations from all rules, reusing cached results
+            # for fixable rules already checked against the final document.
+            violations: list[Violation] = []
+            for rule, config in self._rules:
+                if rule.id in cached_violations:
+                    violations.extend(cached_violations[rule.id])
+                else:
+                    violations.extend(rule.check(document, config))
+
+            violations = filter_suppressed(document, violations)
+            violations.sort(key=lambda v: (v.line, v.column))
+
+            result = FileResult(path=path, violations=violations, content=content)
             result.was_fixed = was_fixed
             return result
 

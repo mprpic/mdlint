@@ -182,3 +182,115 @@ class TestMD004:
 
         assert len(violations) == 1
         assert violations[0].rule_id == "MD004"
+
+
+class TestMD004Fix:
+    @pytest.fixture
+    def rule(self) -> MD004:
+        return MD004()
+
+    @pytest.fixture
+    def config(self) -> MD004Config:
+        return MD004Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD004, config: MD004Config) -> None:
+        """Valid document should return None (nothing to fix)."""
+        content = load_fixture("md004", "valid.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_no_lists(self, rule: MD004, config: MD004Config) -> None:
+        """Document with no lists should return None."""
+        content = load_fixture("md004", "no_lists.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_consistent_mixed_markers(self, rule: MD004, config: MD004Config) -> None:
+        """Fix mixed markers in consistent mode (uses first marker as expected)."""
+        content = load_fixture("md004", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # First marker is dash, so all should become dashes
+        assert "- Item with dash" in result
+        assert "- Item with asterisk" in result
+        assert "- Item with plus" in result
+
+    def test_fix_to_asterisk_style(self, rule: MD004) -> None:
+        """Fix dash markers to asterisk style."""
+        config = MD004Config(style="asterisk")
+        content = load_fixture("md004", "dash.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_to_plus_style(self, rule: MD004) -> None:
+        """Fix dash markers to plus style."""
+        config = MD004Config(style="plus")
+        content = load_fixture("md004", "dash.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_to_dash_style(self, rule: MD004) -> None:
+        """Fix asterisk markers to dash style."""
+        config = MD004Config(style="dash")
+        content = load_fixture("md004", "asterisk.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_already_correct_style(self, rule: MD004) -> None:
+        """Already correct style should return None."""
+        config = MD004Config(style="dash")
+        content = load_fixture("md004", "dash.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_sublist_invalid(self, rule: MD004) -> None:
+        """Fix sublist mode violations."""
+        config = MD004Config(style="sublist")
+        content = load_fixture("md004", "sublist_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_sublist_returns_none_for_valid(self, rule: MD004) -> None:
+        """Valid sublist document should return None."""
+        config = MD004Config(style="sublist")
+        content = load_fixture("md004", "sublist_valid.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_sublist_separate_lists(self, rule: MD004) -> None:
+        """Fix sublist violations across separate lists."""
+        config = MD004Config(style="sublist")
+        content = load_fixture("md004", "sublist_separate_lists.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_blockquote_mixed(self, rule: MD004, config: MD004Config) -> None:
+        """Fix mixed markers inside a blockquote."""
+        content = load_fixture("md004", "blockquote_mixed.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fixable_property(self, rule: MD004) -> None:
+        """Rule should report as fixable."""
+        assert rule.fixable is True

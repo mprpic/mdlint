@@ -57,9 +57,11 @@ Closed ATX headings with multiple spaces inside hashes.
     # Pattern to strip blockquote prefixes from lines
     BLOCKQUOTE_PREFIX = re.compile(r"^(\s*>\s*)+")
 
-    def check(self, document: Document, config: MD021Config) -> list[Violation]:
-        """Check for multiple spaces in closed ATX style headings."""
-        violations: list[Violation] = []
+    def _find_multiple_space_lines(
+        self, document: Document
+    ) -> list[tuple[int, str, str, re.Match[str]]]:
+        """Return (line_num, raw_line, bq_prefix, match) for headings with multiple spaces."""
+        results: list[tuple[int, str, str, re.Match[str]]] = []
 
         for token in document.tokens:
             if token.type != "heading_open":
@@ -76,7 +78,9 @@ Closed ATX headings with multiple spaces inside hashes.
                 continue
 
             # Strip blockquote prefix before matching
-            stripped = self.BLOCKQUOTE_PREFIX.sub("", raw_line)
+            bq_match = self.BLOCKQUOTE_PREFIX.match(raw_line)
+            prefix = bq_match.group(0) if bq_match else ""
+            stripped = raw_line[len(prefix) :]
 
             match = self.CLOSED_ATX_PATTERN.match(stripped)
             if not match:
@@ -85,27 +89,54 @@ Closed ATX headings with multiple spaces inside hashes.
             left_space = match.group(2)
             right_space = match.group(4)
 
-            # Check for multiple spaces (more than one space/tab)
+            if len(left_space) > 1 or len(right_space) > 1:
+                results.append((line_num, raw_line, prefix, match))
+
+        return results
+
+    def check(self, document: Document, config: MD021Config) -> list[Violation]:
+        """Check for multiple spaces in closed ATX style headings."""
+        violations: list[Violation] = []
+
+        for line_num, raw_line, _, match in self._find_multiple_space_lines(document):
+            left_space = match.group(2)
+            right_space = match.group(4)
+
             multiple_left = len(left_space) > 1
             multiple_right = len(right_space) > 1
 
-            if multiple_left or multiple_right:
-                if multiple_left and multiple_right:
-                    message = "Multiple spaces inside hashes on closed ATX heading"
-                elif multiple_left:
-                    message = "Multiple spaces after opening hashes on closed ATX heading"
-                else:
-                    message = "Multiple spaces before closing hashes on closed ATX heading"
+            if multiple_left and multiple_right:
+                message = "Multiple spaces inside hashes on closed ATX heading"
+            elif multiple_left:
+                message = "Multiple spaces after opening hashes on closed ATX heading"
+            else:
+                message = "Multiple spaces before closing hashes on closed ATX heading"
 
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message=message,
-                        context=raw_line,
-                    )
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=message,
+                    context=raw_line,
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD021Config) -> str | None:
+        """Fix multiple spaces inside hashes by collapsing to a single space."""
+        matching_lines = self._find_multiple_space_lines(document)
+        if not matching_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, _, prefix, match in matching_lines:
+            opening_hashes = match.group(1)
+            content = match.group(3)
+            closing_hashes = match.group(5)
+
+            lines[line_num - 1] = f"{prefix}{opening_hashes} {content} {closing_hashes}"
+
+        return "\n".join(lines)

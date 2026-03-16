@@ -64,7 +64,7 @@ This has `  spaces on both sides  ` in code.
         violations: list[Violation] = []
 
         # Build set of line numbers inside code blocks
-        code_block_lines = self._get_code_block_lines(document)
+        code_block_lines = document.code_block_lines
 
         for line_num, line in enumerate(document.lines, start=1):
             # Skip lines in code blocks
@@ -123,3 +123,55 @@ This has `  spaces on both sides  ` in code.
                     )
 
         return violations
+
+    def fix(self, document: Document, config: MD038Config) -> str | None:
+        """Fix spaces inside code span elements by stripping unnecessary whitespace."""
+        code_block_lines = document.code_block_lines
+        changed = False
+        lines = document.content.split("\n")
+
+        for line_idx, line in enumerate(lines):
+            line_num = line_idx + 1
+            if line_num in code_block_lines:
+                continue
+
+            new_line = self.CODE_SPAN_PATTERN.sub(lambda m: self._fix_code_span(m), line)
+            if new_line != line:
+                lines[line_idx] = new_line
+                changed = True
+
+        if not changed:
+            return None
+        return "\n".join(lines)
+
+    @staticmethod
+    def _fix_code_span(match: re.Match) -> str:
+        """Fix a single code span match by removing unnecessary spaces."""
+        backticks = match.group(1)
+        content = match.group(2)
+
+        # Skip if content is only whitespace (valid per CommonMark spec)
+        if content.strip() == "":
+            return match.group(0)
+
+        # Determine the effective content the same way the check does
+        if content.startswith(" ") and content.endswith(" "):
+            effective = content[1:-1]
+            had_padding = True
+        else:
+            effective = content
+            had_padding = False
+
+        has_leading = effective.startswith((" ", "\t"))
+        has_trailing = effective.endswith((" ", "\t"))
+
+        # No violation — return unchanged
+        if not has_leading and not has_trailing:
+            return match.group(0)
+
+        stripped = effective.strip()
+
+        # Re-add symmetric padding if it was present originally
+        if had_padding:
+            return f"{backticks} {stripped} {backticks}"
+        return f"{backticks}{stripped}{backticks}"

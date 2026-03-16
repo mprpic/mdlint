@@ -131,3 +131,86 @@ class TestMD048:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_consistent_backtick_first(self, rule: MD048, config: MD048Config) -> None:
+        """Fix converts tildes to backticks when first fence uses backticks."""
+        content = load_fixture("md048", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_consistent_tilde_first(self, rule: MD048, config: MD048Config) -> None:
+        """Fix converts backticks to tildes when first fence uses tildes."""
+        content = load_fixture("md048", "tilde_then_backtick.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "```" not in result
+        assert "~~~" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_violations(self, rule: MD048, config: MD048Config) -> None:
+        """Fix corrects multiple inconsistent fences."""
+        content = load_fixture("md048", "multiple_violations.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD048, config: MD048Config) -> None:
+        """Fix returns None when document is already valid."""
+        content = load_fixture("md048", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_returns_none_for_no_fences(self, rule: MD048, config: MD048Config) -> None:
+        """Fix returns None when document has no fences."""
+        content = load_fixture("md048", "no_fences.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_style_backtick(self, rule: MD048) -> None:
+        """Fix converts all tildes to backticks when style is backtick."""
+        config = MD048Config(style="backtick")
+        content = load_fixture("md048", "all_tildes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "~~~" not in result
+        assert "```" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_style_tilde(self, rule: MD048) -> None:
+        """Fix converts all backticks to tildes when style is tilde."""
+        config = MD048Config(style="tilde")
+        content = load_fixture("md048", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "```" not in result
+        assert "~~~" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_style_backtick_already_valid(self, rule: MD048) -> None:
+        """Fix returns None when all fences already use backticks."""
+        config = MD048Config(style="backtick")
+        content = load_fixture("md048", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_style_tilde_already_valid(self, rule: MD048) -> None:
+        """Fix returns None when all fences already use tildes."""
+        config = MD048Config(style="tilde")
+        content = load_fixture("md048", "all_tildes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

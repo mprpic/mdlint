@@ -61,11 +61,8 @@ def hello():
 Some more text here.
 """
 
-    def check(self, document: Document, config: MD031Config) -> list[Violation]:
-        """Check for blanks-around-fences violations."""
-        violations: list[Violation] = []
-
-        # Collect list ranges once upfront (only needed when list_items is disabled)
+    def _get_fences(self, document: Document, config: MD031Config) -> list[tuple[int, int]]:
+        """Return 0-indexed (start, end) ranges for applicable fence tokens."""
         if not config.list_items:
             list_ranges = [
                 (token.map[0], token.map[1])
@@ -75,45 +72,85 @@ Some more text here.
         else:
             list_ranges = []
 
+        fences: list[tuple[int, int]] = []
         for token in document.tokens:
             if token.type == "fence" and token.map:
-                fence_start_line = token.map[0] + 1  # 1-indexed
-                fence_end_line = token.map[1]  # exclusive, so last line is map[1]
-
-                # Skip fences in list items if list_items is disabled
                 if not config.list_items and any(
                     start <= token.map[0] < end for start, end in list_ranges
                 ):
                     continue
+                fences.append((token.map[0], token.map[1]))
+        return fences
 
-                # Check blank line above
-                if fence_start_line > 1:
-                    line_above = document.get_line(fence_start_line - 1)
-                    if line_above is not None and line_above.strip() != "":
-                        violations.append(
-                            Violation(
-                                line=fence_start_line,
-                                column=1,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message="Fenced code block should be preceded by a blank line",
-                                context=document.get_line(fence_start_line),
-                            )
-                        )
+    def check(self, document: Document, config: MD031Config) -> list[Violation]:
+        """Check for blanks-around-fences violations."""
+        violations: list[Violation] = []
 
-                # Check blank line below
-                if fence_end_line < len(document.lines):
-                    line_below = document.get_line(fence_end_line + 1)
-                    if line_below is not None and line_below.strip() != "":
-                        violations.append(
-                            Violation(
-                                line=fence_end_line,
-                                column=1,
-                                rule_id=self.id,
-                                rule_name=self.name,
-                                message="Fenced code block should be followed by a blank line",
-                                context=document.get_line(fence_end_line),
-                            )
+        for fence_start, fence_end in self._get_fences(document, config):
+            fence_start_line = fence_start + 1  # 1-indexed
+            fence_end_line = fence_end  # exclusive, so last line is map[1]
+
+            # Check blank line above
+            if fence_start_line > 1:
+                line_above = document.get_line(fence_start_line - 1)
+                if line_above is not None and line_above.strip() != "":
+                    violations.append(
+                        Violation(
+                            line=fence_start_line,
+                            column=1,
+                            rule_id=self.id,
+                            rule_name=self.name,
+                            message="Fenced code block should be preceded by a blank line",
+                            context=document.get_line(fence_start_line),
                         )
+                    )
+
+            # Check blank line below
+            if fence_end_line < len(document.lines):
+                line_below = document.get_line(fence_end_line + 1)
+                if line_below is not None and line_below.strip() != "":
+                    violations.append(
+                        Violation(
+                            line=fence_end_line,
+                            column=1,
+                            rule_id=self.id,
+                            rule_name=self.name,
+                            message="Fenced code block should be followed by a blank line",
+                            context=document.get_line(fence_end_line),
+                        )
+                    )
 
         return violations
+
+    def fix(self, document: Document, config: MD031Config) -> str | None:
+        """Fix blanks-around-fences violations by inserting missing blank lines."""
+        fences = self._get_fences(document, config)
+
+        if not fences:
+            return None
+
+        lines = document.content.split("\n")
+        num_doc_lines = len(document.lines)
+        changed = False
+
+        # Process fences from bottom to top so insertions don't shift indices
+        for fence_start, fence_end in reversed(fences):
+            # fence_start is 0-indexed line of opening fence
+            # fence_end is 0-indexed exclusive end (first line after closing fence)
+
+            # Fix blank line below
+            if fence_end < num_doc_lines:
+                if lines[fence_end].strip() != "":
+                    lines.insert(fence_end, "")
+                    changed = True
+
+            # Fix blank line above
+            if fence_start > 0:
+                if lines[fence_start - 1].strip() != "":
+                    lines.insert(fence_start, "")
+                    changed = True
+
+        if not changed:
+            return None
+
+        return "\n".join(lines)

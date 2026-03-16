@@ -76,7 +76,7 @@ But this uses _italic_ with underscores.
         if config.style in ("asterisk", "underscore"):
             expected_style = config.style
 
-        code_block_lines = self._get_code_block_lines(document)
+        code_block_lines = document.code_block_lines
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
@@ -179,3 +179,97 @@ But this uses _italic_ with underscores.
                     break
 
         return False
+
+    def fix(self, document: Document, config: MD049Config) -> str | None:
+        """Fix emphasis style by replacing markers to match expected style."""
+        expected_style: str | None = None
+        if config.style in ("asterisk", "underscore"):
+            expected_style = config.style
+
+        code_block_lines = document.code_block_lines
+
+        # For "consistent" mode, determine style from first emphasis marker
+        if expected_style is None:
+            for token in document.tokens:
+                if token.type != "inline" or not token.children:
+                    continue
+                for child in token.children:
+                    if child.type == "em_open" and child.markup in self.MARKER_TO_STYLE:
+                        expected_style = self.MARKER_TO_STYLE[child.markup]
+                        break
+                if expected_style:
+                    break
+
+        if expected_style is None:
+            return None
+
+        target_marker = "*" if expected_style == "asterisk" else "_"
+
+        # Collect (line_1indexed, column_1indexed) positions to replace
+        replacements: list[tuple[int, int]] = []
+
+        for token in document.tokens:
+            if token.type != "inline" or not token.children or not token.map:
+                continue
+
+            base_line = token.map[0] + 1
+            search_pos = 0
+            # Track whether each em_open should be fixed; pop on em_close
+            fix_stack: list[bool] = []
+
+            for i, child in enumerate(token.children):
+                if child.type in ("strong_open", "strong_close") and child.markup:
+                    pos = token.content.find(child.markup, search_pos)
+                    if pos >= 0:
+                        search_pos = pos + len(child.markup)
+                    continue
+
+                if child.type == "em_open":
+                    marker = child.markup
+                    if marker not in self.MARKER_TO_STYLE:
+                        continue
+
+                    line, column, search_pos = self._find_marker_position(
+                        token.content, marker, search_pos, base_line
+                    )
+
+                    current_style = self.MARKER_TO_STYLE[marker]
+                    should_fix = (
+                        current_style != expected_style
+                        and line not in code_block_lines
+                        and not (
+                            expected_style == "underscore"
+                            and self._is_intraword_emphasis(token.children, i)
+                        )
+                    )
+                    fix_stack.append(should_fix)
+
+                    if should_fix:
+                        replacements.append((line, column))
+                    continue
+
+                if child.type == "em_close":
+                    marker = child.markup
+                    if marker not in self.MARKER_TO_STYLE:
+                        continue
+
+                    line, column, search_pos = self._find_marker_position(
+                        token.content, marker, search_pos, base_line
+                    )
+
+                    should_fix = fix_stack.pop() if fix_stack else False
+                    if should_fix:
+                        replacements.append((line, column))
+                    continue
+
+        if not replacements:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, column in sorted(replacements, reverse=True):
+            line_idx = line_num - 1
+            col_idx = column - 1
+            line = lines[line_idx]
+            lines[line_idx] = line[:col_idx] + target_marker + line[col_idx + 1 :]
+
+        return "\n".join(lines)

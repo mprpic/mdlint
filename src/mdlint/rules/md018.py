@@ -50,34 +50,49 @@ class MD018(Rule[MD018Config]):
     # Pattern to match lines starting with hash(es) followed by non-space, non-hash char
     ATX_MISSING_SPACE_PATTERN = re.compile(r"^(#+)[^#\s]")
 
+    def _find_missing_space_lines(self, document: Document) -> list[tuple[int, re.Match[str]]]:
+        """Return list of (line_num, match) for lines missing space after hash."""
+        ignored_lines = document.code_block_lines | document.html_block_lines
+
+        results: list[tuple[int, re.Match[str]]] = []
+        for line_num, line in enumerate(document.lines, start=1):
+            if line_num in ignored_lines:
+                continue
+
+            match = self.ATX_MISSING_SPACE_PATTERN.match(line)
+            if match:
+                results.append((line_num, match))
+
+        return results
+
     def check(self, document: Document, config: MD018Config) -> list[Violation]:
         """Check for missing space after hash in atx headings."""
         violations: list[Violation] = []
 
-        # Build set of line numbers inside code blocks or HTML blocks
-        ignored_lines = self._get_code_block_lines(document)
-        for token in document.tokens:
-            if token.type == "html_block" and token.map:
-                for line_num in range(token.map[0] + 1, token.map[1] + 1):
-                    ignored_lines.add(line_num)
-
-        for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines inside code blocks or HTML blocks
-            if line_num in ignored_lines:
-                continue
-
-            # Check if line matches the missing space pattern
-            match = self.ATX_MISSING_SPACE_PATTERN.match(line)
-            if match:
-                violations.append(
-                    Violation(
-                        line=line_num,
-                        column=1,
-                        rule_id=self.id,
-                        rule_name=self.name,
-                        message="No space after hash on atx style heading",
-                        context=document.get_line(line_num),
-                    )
+        for line_num, _ in self._find_missing_space_lines(document):
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message="No space after hash on atx style heading",
+                    context=document.get_line(line_num),
                 )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD018Config) -> str | None:
+        """Fix missing space after hash in atx headings by inserting a space."""
+        matching_lines = self._find_missing_space_lines(document)
+        if not matching_lines:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, match in matching_lines:
+            hashes = match.group(1)
+            rest = lines[line_num - 1][match.end(1) :]
+            lines[line_num - 1] = hashes + " " + rest
+
+        return "\n".join(lines)

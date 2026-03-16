@@ -87,6 +87,9 @@ Underscores also fail: __ bold __ and _ italic _.
                 if child.type != "text":
                     continue
 
+                if "*" not in child.content and "_" not in child.content:
+                    continue
+
                 source_line = document.get_line(current_line)
                 if not source_line:
                     continue
@@ -138,6 +141,75 @@ Underscores also fail: __ bold __ and _ italic _.
                             )
 
         return violations
+
+    def fix(self, document: Document, config: MD037Config) -> str | None:
+        """Fix spaces inside emphasis markers by stripping them."""
+        changed = False
+        lines = document.content.split("\n")
+
+        for token in document.tokens:
+            if token.type != "inline" or not token.children or not token.map:
+                continue
+
+            current_line = token.map[0] + 1  # 1-indexed
+            used_ranges: dict[int, list[tuple[int, int]]] = {}
+
+            for child in token.children:
+                if child.type in ("softbreak", "hardbreak"):
+                    current_line += 1
+                    continue
+                if child.type != "text":
+                    continue
+
+                if "*" not in child.content and "_" not in child.content:
+                    continue
+
+                source_line = lines[current_line - 1]
+                if not source_line:
+                    continue
+
+                for marker in self.MARKERS:
+                    pattern = self._PATTERNS[marker]
+                    for match in pattern.finditer(child.content):
+                        match_text = match.group(0)
+                        content = match.group(1)
+
+                        has_leading_space = content[0].isspace()
+                        has_trailing_space = content[-1].isspace()
+
+                        if not has_leading_space and not has_trailing_space:
+                            continue
+
+                        line_ranges = used_ranges.setdefault(current_line, [])
+                        source_pos = self._find_in_source(match_text, source_line, line_ranges)
+                        if source_pos < 0:
+                            continue
+
+                        line_ranges.append((source_pos, source_pos + len(match_text)))
+
+                        fixed_text = marker + content.strip() + marker
+                        source_line = (
+                            source_line[:source_pos]
+                            + fixed_text
+                            + source_line[source_pos + len(match_text) :]
+                        )
+                        lines[current_line - 1] = source_line
+
+                        # Adjust used ranges for the length change
+                        diff = len(fixed_text) - len(match_text)
+                        if diff != 0:
+                            line_ranges[-1] = (source_pos, source_pos + len(fixed_text))
+                            for i in range(len(line_ranges) - 1):
+                                s, e = line_ranges[i]
+                                if s > source_pos:
+                                    line_ranges[i] = (s + diff, e + diff)
+
+                        changed = True
+
+        if not changed:
+            return None
+
+        return "\n".join(lines)
 
     @staticmethod
     def _find_in_source(text: str, source_line: str, used_ranges: list[tuple[int, int]]) -> int:

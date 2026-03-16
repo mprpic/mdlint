@@ -186,3 +186,103 @@ Then uses **asterisks** later.
         assert len(violations) == 1
         assert violations[0].line == 1
         assert violations[0].column == 14
+
+
+class TestMD050Fix:
+    @pytest.fixture
+    def rule(self) -> MD050:
+        return MD050()
+
+    @pytest.fixture
+    def config(self) -> MD050Config:
+        return MD050Config()
+
+    def test_fix_consistent_converts_to_first_style(self, rule: MD050, config: MD050Config) -> None:
+        """Fix in consistent mode converts all strong to match the first marker."""
+        content = load_fixture("md050", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # First marker is **, so __ should become **
+        assert "**underscores**" in result.split("\n")[4]
+
+    def test_fix_returns_none_for_valid(self, rule: MD050, config: MD050Config) -> None:
+        """Fix returns None when there are no violations."""
+        content = load_fixture("md050", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_asterisk_style(self, rule: MD050) -> None:
+        """Fix converts underscores to asterisks when asterisk style is configured."""
+        config = MD050Config(style="asterisk")
+        content = load_fixture("md050", "underscore.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_underscore_style(self, rule: MD050) -> None:
+        """Fix converts asterisks to underscores when underscore style is configured."""
+        config = MD050Config(style="underscore")
+        content = load_fixture("md050", "asterisk.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_already_correct_style(self, rule: MD050) -> None:
+        """Fix returns None when all strong already matches the configured style."""
+        config = MD050Config(style="asterisk")
+        content = load_fixture("md050", "asterisk.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_no_strong(self, rule: MD050, config: MD050Config) -> None:
+        """Fix returns None for document without strong text."""
+        content = load_fixture("md050", "no_strong.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiline(self, rule: MD050, config: MD050Config) -> None:
+        """Fix replaces strong markers in multi-line paragraphs."""
+        content = load_fixture("md050", "multiline.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_list(self, rule: MD050, config: MD050Config) -> None:
+        """Fix replaces strong markers in list items."""
+        content = load_fixture("md050", "list.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_blockquote(self, rule: MD050, config: MD050Config) -> None:
+        """Fix replaces strong markers in blockquotes."""
+        content = load_fixture("md050", "blockquote.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_empty_document(self, rule: MD050, config: MD050Config) -> None:
+        """Fix returns None for empty document."""
+        doc = Document(Path("empty.md"), "")
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fixable_property(self, rule: MD050) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

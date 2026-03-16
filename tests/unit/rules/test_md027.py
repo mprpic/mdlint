@@ -101,3 +101,42 @@ class TestMD027:
         assert violations[0].rule_id == "MD027"
         assert violations[0].rule_name == "no-multiple-space-blockquote"
         assert ">  This is a blockquote" in violations[0].context
+
+    def test_fix_corrects_invalid(self, rule: MD027, config: MD027Config) -> None:
+        """Fix collapses multiple spaces to one after blockquote marker."""
+        content = load_fixture("md027", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD027, config: MD027Config) -> None:
+        """Fix returns None when content is already valid."""
+        content = load_fixture("md027", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_nested_blockquote(self, rule: MD027, config: MD027Config) -> None:
+        """Fix corrects nested blockquotes with multiple spaces."""
+        content = "> Outer quote\n>>  Inner quote with extra space\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "> Outer quote\n>> Inner quote with extra space\n"
+
+    def test_fix_preserves_code_blocks(self, rule: MD027, config: MD027Config) -> None:
+        """Fix does not modify content inside code blocks."""
+        content = "> Some text:\n>\n>     indented code\n>     more code\n>\n> Back to normal\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_produces_expected_output(self, rule: MD027, config: MD027Config) -> None:
+        """Fix of invalid fixture produces correct spacing."""
+        invalid = load_fixture("md027", "invalid.md")
+        doc = Document(Path("test.md"), invalid)
+        result = rule.fix(doc, config)
+        expected = "> This is a blockquote with bad indentation\n> there should only be one.\n"
+        assert result == expected

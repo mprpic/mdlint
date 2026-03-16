@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from urllib.parse import unquote
 
@@ -95,137 +96,139 @@ Another [bad link](#missing-section) here.
     # Characters that need URL-encoding in fragments
     _UNSAFE_FRAGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]")
 
-    def check(self, document: Document, config: MD051Config) -> list[Violation]:
-        """Check for invalid link fragment violations."""
-        violations: list[Violation] = []
+    def _find_fragment_links(
+        self, document: Document, config: MD051Config
+    ) -> Iterator[tuple[int, int, re.Match[str], str, str | None]]:
+        """Yield fragment link matches with metadata.
 
-        # Build set of line numbers inside code blocks
-        code_block_lines = self._get_code_block_lines(document)
-
-        # Build set of valid fragments and case-insensitive lookup
+        Yields tuples of (line_num, column, match, destination, matching_key).
+        matching_key is the correctly-cased fragment for case mismatches, or None
+        if the fragment is valid or not found at all.
+        """
+        code_block_lines = document.code_block_lines
         fragments = self._collect_fragments(document, code_block_lines)
         fragments_lower: dict[str, str] = {k.lower(): k for k in fragments}
+        code_span_positions = document.code_span_positions
 
-        # Build map of inline code span columns per line
-        code_span_positions = self._get_code_span_positions(document)
-
-        # Compile ignored pattern if provided
         ignored_pattern_re = None
         if config.ignored_pattern:
             ignored_pattern_re = re.compile(config.ignored_pattern)
 
         for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines in code blocks
             if line_num in code_block_lines:
                 continue
 
-            # Check inline links
             for match in self.INLINE_LINK_PATTERN.finditer(line):
                 column = match.start() + 1
-
-                # Check if this match is inside an inline code span
                 if column in code_span_positions.get(line_num, set()):
                     continue
 
                 destination = match.group(2).strip()
-                violation = self._check_fragment(
-                    destination,
-                    fragments,
-                    fragments_lower,
-                    config,
-                    ignored_pattern_re,
-                    line_num,
-                    column,
-                    document,
+                result = self._classify_fragment(
+                    destination, fragments, fragments_lower, config, ignored_pattern_re
                 )
-                if violation:
-                    violations.append(violation)
+                if result is not None:
+                    yield line_num, column, match, destination, result
 
-            # Check reference definitions
             ref_match = self.REFERENCE_DEF_PATTERN.match(line)
             if ref_match:
                 destination = ref_match.group(2).strip()
-                # Find where the destination starts
                 dest_start = line.find(destination)
                 column = dest_start + 1 if dest_start >= 0 else 1
-
-                violation = self._check_fragment(
-                    destination,
-                    fragments,
-                    fragments_lower,
-                    config,
-                    ignored_pattern_re,
-                    line_num,
-                    column,
-                    document,
+                result = self._classify_fragment(
+                    destination, fragments, fragments_lower, config, ignored_pattern_re
                 )
-                if violation:
-                    violations.append(violation)
+                if result is not None:
+                    yield line_num, column, ref_match, destination, result
 
-        return violations
-
-    def _check_fragment(
+    def _classify_fragment(
         self,
         destination: str,
         fragments: dict[str, int],
         fragments_lower: dict[str, str],
         config: MD051Config,
         ignored_pattern_re: re.Pattern | None,
-        line_num: int,
-        column: int,
-        document: Document,
-    ) -> Violation | None:
-        """Check if a link destination fragment is valid.
+    ) -> str | None:
+        """Classify a fragment link destination.
 
-        Returns a Violation if invalid, None otherwise.
+        Returns:
+            - None if the fragment is valid or should be skipped (not a violation).
+            - The correctly-cased fragment string for case mismatches.
+            - Empty string "" if the fragment is not found at all.
         """
-        # Skip if not a fragment link
         if not destination.startswith("#") or len(destination) <= 1:
             return None
-
-        # Skip GitHub line fragment syntax
         if self.LINE_FRAGMENT_PATTERN.match(destination):
             return None
 
-        fragment_text = destination[1:]  # Remove leading #
-
-        # Check if fragment matches ignored pattern
+        fragment_text = destination[1:]
         if ignored_pattern_re and ignored_pattern_re.search(fragment_text):
             return None
 
-        # Decode URL-encoded fragment for comparison
         decoded_fragment = unquote(fragment_text)
         encoded_destination = "#" + self._encode_fragment(decoded_fragment)
 
-        # Check if fragment exists
         if encoded_destination in fragments:
             return None
 
-        # Check case-insensitive match using pre-built lookup
         matching_key = fragments_lower.get(destination.lower())
-
         if matching_key:
             if config.ignore_case:
                 return None
-            # Case mismatch - report with suggestion
-            return Violation(
-                line=line_num,
-                column=column,
-                rule_id=self.id,
-                rule_name=self.name,
-                message=f"Expected: {matching_key}; Actual: {destination}",
-                context=document.get_line(line_num),
+            return matching_key
+
+        return ""
+
+    def check(self, document: Document, config: MD051Config) -> list[Violation]:
+        """Check for invalid link fragment violations."""
+        violations: list[Violation] = []
+
+        for line_num, column, _, destination, matching_key in self._find_fragment_links(
+            document, config
+        ):
+            if matching_key:
+                message = f"Expected: {matching_key}; Actual: {destination}"
+            else:
+                message = f"Link fragment {destination} not found in document"
+
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=column,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message=message,
+                    context=document.get_line(line_num),
+                )
             )
 
-        # Fragment not found
-        return Violation(
-            line=line_num,
-            column=column,
-            rule_id=self.id,
-            rule_name=self.name,
-            message=f"Link fragment {destination} not found in document",
-            context=document.get_line(line_num),
-        )
+        return violations
+
+    def fix(self, document: Document, config: MD051Config) -> str | None:
+        """Fix case-mismatch link fragments by replacing with the correct casing.
+
+        Only fixes fragments that exist in the document but with different casing.
+        Non-existent fragments are left unchanged since intent cannot be determined.
+        """
+        replacements_by_line: dict[int, list[tuple[re.Match[str], str]]] = {}
+
+        for line_num, _, match, _, matching_key in self._find_fragment_links(document, config):
+            if matching_key:
+                replacements_by_line.setdefault(line_num, []).append((match, matching_key))
+
+        if not replacements_by_line:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, line_replacements in replacements_by_line.items():
+            line = lines[line_num - 1]
+            for match, new_dest in reversed(line_replacements):
+                start = match.start(2)
+                end = match.end(2)
+                line = line[:start] + new_dest + line[end:]
+            lines[line_num - 1] = line
+
+        return "\n".join(lines)
 
     def _collect_fragments(self, document: Document, code_block_lines: set[int]) -> dict[str, int]:
         """Collect all valid fragments from the document.

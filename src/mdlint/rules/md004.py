@@ -144,3 +144,71 @@ class MD004(Rule[MD004Config]):
                         )
 
         return violations
+
+    STYLE_TO_MARKER = {
+        "asterisk": "*",
+        "plus": "+",
+        "dash": "-",
+    }
+
+    def fix(self, document: Document, config: MD004Config) -> str | None:
+        """Fix list marker style violations by replacing markers with the expected style."""
+        style = config.style
+
+        # Collect list item info: (line_0indexed, current_marker, nesting_level)
+        items: list[tuple[int, str, int]] = []
+        current_level = 0
+
+        for token in document.tokens:
+            if token.type == "bullet_list_open":
+                current_level += 1
+            elif token.type == "bullet_list_close":
+                current_level = max(0, current_level - 1)
+            elif token.type == "list_item_open" and token.markup in self.MARKER_TO_STYLE:
+                line_0 = token.map[0] if token.map else 0
+                items.append((line_0, token.markup, current_level))
+
+        if not items:
+            return None
+
+        # Determine expected marker for each item
+        level_styles: dict[int, str] = {}
+        expected_style: str | None = None
+        if style == "sublist":
+            for _, marker, level in items:
+                if level not in level_styles:
+                    level_styles[level] = self.MARKER_TO_STYLE[marker]
+        elif style in ("asterisk", "plus", "dash"):
+            expected_style = style
+        else:
+            # consistent: use first marker's style
+            expected_style = self.MARKER_TO_STYLE[items[0][1]]
+
+        # Build list of fixes: (line_0indexed, expected_marker)
+        fixes: list[tuple[int, str]] = []
+        for line_0, marker, level in items:
+            current_marker_style = self.MARKER_TO_STYLE[marker]
+            if style == "sublist":
+                exp = level_styles[level]
+            else:
+                assert expected_style is not None
+                exp = expected_style
+
+            if current_marker_style != exp:
+                fixes.append((line_0, self.STYLE_TO_MARKER[exp]))
+
+        if not fixes:
+            return None
+
+        lines = document.content.split("\n")
+        for line_0, new_marker in fixes:
+            line = lines[line_0]
+            # Find the first list marker (-, *, +) preceded only by whitespace/blockquote chars
+            for i, ch in enumerate(line):
+                if ch in "-*+" and i + 1 < len(line) and line[i + 1] == " ":
+                    lines[line_0] = line[:i] + new_marker + line[i + 1 :]
+                    break
+                if ch not in " \t>":
+                    break
+
+        return "\n".join(lines)

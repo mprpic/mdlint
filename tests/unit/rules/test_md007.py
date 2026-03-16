@@ -137,3 +137,50 @@ class TestMD007:
         config = MD007Config(indent=4)
 
         assert config.start_indent == 4
+
+    def test_fix_corrects_invalid(self, rule: MD007, config: MD007Config) -> None:
+        """Fix should correct indentation violations."""
+        content = load_fixture("md007", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD007, config: MD007Config) -> None:
+        """Valid document should return None (nothing to fix)."""
+        content = load_fixture("md007", "valid.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_returns_none_no_lists(self, rule: MD007, config: MD007Config) -> None:
+        """Document without lists should return None."""
+        content = load_fixture("md007", "no_lists.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_start_indented(self, rule: MD007) -> None:
+        """Fix should add indentation when start_indented is True."""
+        content = load_fixture("md007", "start_indented_invalid.md")
+        doc = Document(Path("test.md"), content)
+        config = MD007Config(start_indented=True)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_blockquote_returns_none(self, rule: MD007, config: MD007Config) -> None:
+        """Valid blockquote list should return None."""
+        content = load_fixture("md007", "blockquote.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_mixed_list_returns_none(self, rule: MD007, config: MD007Config) -> None:
+        """Mixed list types (no violations) should return None."""
+        content = load_fixture("md007", "mixed_list.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fixable_property(self, rule: MD007) -> None:
+        """Rule should report as fixable."""
+        assert rule.fixable is True

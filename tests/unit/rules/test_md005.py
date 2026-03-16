@@ -135,3 +135,79 @@ class TestMD005:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+
+class TestMD005Fix:
+    @pytest.fixture
+    def rule(self) -> MD005:
+        return MD005()
+
+    @pytest.fixture
+    def config(self) -> MD005Config:
+        return MD005Config()
+
+    def test_fix_corrects_invalid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix adjusts indentation to be consistent."""
+        content = load_fixture("md005", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix returns None when there are no violations."""
+        content = load_fixture("md005", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_ordered_list_invalid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix adjusts ordered list indentation to be consistent."""
+        content = load_fixture("md005", "ordered_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_ordered_valid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix returns None for valid ordered list."""
+        content = load_fixture("md005", "ordered_valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_right_aligned_invalid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix adjusts right-aligned ordered list markers."""
+        content = load_fixture("md005", "right_aligned_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_right_aligned_valid(self, rule: MD005, config: MD005Config) -> None:
+        """Fix returns None for valid right-aligned ordered list."""
+        content = load_fixture("md005", "right_aligned_valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_no_lists(self, rule: MD005, config: MD005Config) -> None:
+        """Fix returns None for document without lists."""
+        content = load_fixture("md005", "no_lists.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_lists(self, rule: MD005, config: MD005Config) -> None:
+        """Fix returns None for valid multiple independent lists."""
+        content = load_fixture("md005", "multiple_lists.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fixable_property(self, rule: MD005) -> None:
+        """Rule reports as fixable."""
+        assert rule.fixable is True

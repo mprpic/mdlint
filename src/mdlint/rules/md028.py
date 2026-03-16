@@ -48,6 +48,68 @@ And Jimmy also said:
 > in some parsers, these are treated as the same blockquote.
 """
 
+    def _find_blank_lines_between_blockquotes(self, document: Document) -> list[tuple[int, str]]:
+        """Find blank lines that sit between two blockquote sections.
+
+        Returns a list of (line_num, indent) tuples where line_num is the
+        1-indexed blank line number and indent is the leading whitespace
+        of the preceding blockquote line.
+        """
+        code_lines = document.code_block_lines
+        total_lines = len(document.lines)
+        results: list[tuple[int, str]] = []
+
+        for line_num in range(1, total_lines + 1):
+            if line_num in code_lines:
+                continue
+
+            line = document.get_line(line_num)
+            if line is None or line.strip() != "":
+                continue
+
+            # Look backwards to find a blockquote line before this blank line
+            has_blockquote_before = False
+            before_indent = ""
+            check_line = line_num - 1
+            while check_line >= 1:
+                if check_line in code_lines:
+                    break
+                prev_line = document.get_line(check_line)
+                if prev_line is None:
+                    break
+                if prev_line.strip() == "":
+                    check_line -= 1
+                    continue
+                stripped = prev_line.lstrip()
+                if stripped.startswith(">"):
+                    has_blockquote_before = True
+                    before_indent = prev_line[: len(prev_line) - len(stripped)]
+                break
+
+            if not has_blockquote_before:
+                continue
+
+            # Look forwards to find a blockquote line after this blank line
+            has_blockquote_after = False
+            check_line = line_num + 1
+            while check_line <= total_lines:
+                if check_line in code_lines:
+                    break
+                next_line = document.get_line(check_line)
+                if next_line is None:
+                    break
+                if next_line.strip() == "":
+                    check_line += 1
+                    continue
+                if next_line.lstrip().startswith(">"):
+                    has_blockquote_after = True
+                break
+
+            if has_blockquote_after:
+                results.append((line_num, before_indent))
+
+        return results
+
     def check(self, document: Document, config: MD028Config) -> list[Violation]:
         """Check for blank lines between blockquotes.
 
@@ -60,65 +122,28 @@ And Jimmy also said:
         """
         violations: list[Violation] = []
 
-        code_lines = self._get_code_block_lines(document)
-        lines = document.lines
-        total_lines = len(lines)
-
-        for line_num in range(1, total_lines + 1):
-            if line_num in code_lines:
-                continue
-
-            line = document.get_line(line_num)
-            if line is None:
-                continue
-
-            # Check if this is a blank line
-            if line.strip() == "":
-                # Look backwards to see if there's a blockquote line before
-                has_blockquote_before = False
-                check_line = line_num - 1
-                while check_line >= 1:
-                    if check_line in code_lines:
-                        break
-                    prev_line = document.get_line(check_line)
-                    if prev_line is None:
-                        break
-                    if prev_line.strip() == "":
-                        # Continue looking backwards through blank lines
-                        check_line -= 1
-                        continue
-                    if prev_line.lstrip().startswith(">"):
-                        has_blockquote_before = True
-                    break
-
-                # Look forwards to see if there's a blockquote line after
-                has_blockquote_after = False
-                check_line = line_num + 1
-                while check_line <= total_lines:
-                    if check_line in code_lines:
-                        break
-                    next_line = document.get_line(check_line)
-                    if next_line is None:
-                        break
-                    if next_line.strip() == "":
-                        # Continue looking forwards through blank lines
-                        check_line += 1
-                        continue
-                    if next_line.lstrip().startswith(">"):
-                        has_blockquote_after = True
-                    break
-
-                # If blank line is between two blockquote sections, report it
-                if has_blockquote_before and has_blockquote_after:
-                    violations.append(
-                        Violation(
-                            line=line_num,
-                            column=1,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message="Blank line inside blockquote",
-                            context=line,
-                        )
-                    )
+        for line_num, _ in self._find_blank_lines_between_blockquotes(document):
+            violations.append(
+                Violation(
+                    line=line_num,
+                    column=1,
+                    rule_id=self.id,
+                    rule_name=self.name,
+                    message="Blank line inside blockquote",
+                    context=document.get_line(line_num),
+                )
+            )
 
         return violations
+
+    def fix(self, document: Document, config: MD028Config) -> str | None:
+        """Fix blank lines between blockquotes by adding > marker to continue the blockquote."""
+        gaps = self._find_blank_lines_between_blockquotes(document)
+        if not gaps:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, indent in gaps:
+            lines[line_num - 1] = indent + ">"
+
+        return "\n".join(lines)

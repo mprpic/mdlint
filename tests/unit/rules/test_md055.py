@@ -272,3 +272,98 @@ Cell 3    | Cell 4
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD055, config: MD055Config) -> None:
+        """Fixing invalid content produces valid output."""
+        content = load_fixture("md055", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # The first row has leading+trailing, so fix should add missing pipes
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD055, config: MD055Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md055", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_missing_trailing_pipe(self, rule: MD055, config: MD055Config) -> None:
+        """Fix adds missing trailing pipe."""
+        content = """\
+| Header 1 | Header 2 |
+| -------- | --------
+| Cell 1   | Cell 2   |
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "| -------- | -------- |" in result
+
+    def test_fix_missing_leading_pipe(self, rule: MD055, config: MD055Config) -> None:
+        """Fix adds missing leading pipe."""
+        content = """\
+| Header 1 | Header 2 |
+| -------- | -------- |
+  Cell 1   | Cell 2   |
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "| Cell 1   | Cell 2   |" in result
+
+    def test_fix_style_leading_and_trailing(self, rule: MD055) -> None:
+        """Fix adds leading and trailing pipes when style requires them."""
+        config = MD055Config(style="leading_and_trailing")
+        content = """\
+Header 1 | Header 2
+-------- | --------
+Cell 1   | Cell 2
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_style_no_leading_or_trailing(self, rule: MD055) -> None:
+        """Fix removes leading and trailing pipes when style forbids them."""
+        config = MD055Config(style="no_leading_or_trailing")
+        content = """\
+| Header 1 | Header 2 |
+| -------- | -------- |
+| Cell 1   | Cell 2   |
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_blockquote_inconsistent(self, rule: MD055, config: MD055Config) -> None:
+        """Fix handles tables inside blockquotes."""
+        content = load_fixture("md055", "blockquote_inconsistent.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_tables_inconsistent(self, rule: MD055, config: MD055Config) -> None:
+        """Fix handles multiple tables with inconsistent styles."""
+        content = """\
+| Table 1 A | Table 1 B |
+| --------- | --------- |
+| Cell 1    | Cell 2    |
+
+Table 2 A | Table 2 B
+--------- | ---------
+Cell 3    | Cell 4
+"""
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

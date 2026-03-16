@@ -186,3 +186,120 @@ class TestMD031:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_returns_none_for_valid(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing already valid content returns None."""
+        content = load_fixture("md031", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_corrects_invalid(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing invalid content adds blank lines above and below fences."""
+        content = load_fixture("md031", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_no_blank_above(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing adds blank line above fence."""
+        content = load_fixture("md031", "no_blank_above.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_no_blank_below(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing adds blank line below fence."""
+        content = load_fixture("md031", "no_blank_below.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_multiple_fences(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing multiple invalid fences adds blank lines around all of them."""
+        content = load_fixture("md031", "multiple_invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_consecutive_fences(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing consecutive fences adds blank line between them."""
+        content = load_fixture("md031", "consecutive_fences.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_tilde_fence(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing tilde-style fences works correctly."""
+        content = load_fixture("md031", "tilde_fence.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_empty_fence(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing empty fence adds blank lines around it."""
+        content = load_fixture("md031", "empty_fence.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_fence_after_heading(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing adds blank line between heading and fence."""
+        content = load_fixture("md031", "fence_after_heading.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_boundaries(self, rule: MD031, config: MD031Config) -> None:
+        """Fences at document boundaries need no fix."""
+        content = load_fixture("md031", "boundaries.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_valid(self, rule: MD031, config: MD031Config) -> None:
+        """Multiple valid fences need no fix."""
+        content = load_fixture("md031", "multiple_valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_list_items_default(self, rule: MD031, config: MD031Config) -> None:
+        """Fixing list items with default config adds blank lines."""
+        content = load_fixture("md031", "list_items.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_list_items_disabled(self, rule: MD031) -> None:
+        """With list_items=False, fences in lists are not fixed."""
+        config = MD031Config(list_items=False)
+        content = load_fixture("md031", "list_items.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_list_items_spaced(self, rule: MD031, config: MD031Config) -> None:
+        """Already spaced list items need no fix."""
+        content = load_fixture("md031", "list_items_spaced.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None

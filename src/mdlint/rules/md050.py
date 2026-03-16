@@ -140,6 +140,114 @@ But this uses __underscores__ for bold.
 
         return violations
 
+    def fix(self, document: Document, config: MD050Config) -> str | None:
+        """Fix strong style by replacing markers to match expected style."""
+        expected_style: str | None = None
+        if config.style in ("asterisk", "underscore"):
+            expected_style = config.style
+
+        # For "consistent" mode, determine style from first strong marker
+        if expected_style is None:
+            for token in document.tokens:
+                if token.type != "inline" or not token.children:
+                    continue
+                for child in token.children:
+                    if child.type == "strong_open" and child.markup in self.MARKUP_TO_STYLE:
+                        expected_style = self.MARKUP_TO_STYLE[child.markup]
+                        break
+                if expected_style:
+                    break
+
+        if expected_style is None:
+            return None
+
+        target_marker = "**" if expected_style == "asterisk" else "__"
+        wrong_marker = "__" if expected_style == "asterisk" else "**"
+
+        # Collect line numbers (1-indexed) with count of markers to replace per line
+        replacements_per_line: dict[int, int] = {}
+
+        for token in document.tokens:
+            if token.type != "inline" or not token.children or not token.map:
+                continue
+
+            base_line = token.map[0] + 1
+            search_pos = 0
+            fix_stack: list[bool] = []
+
+            for child in token.children:
+                if child.type in ("em_open", "em_close") and child.markup:
+                    pos = token.content.find(child.markup, search_pos)
+                    if pos >= 0:
+                        search_pos = pos + len(child.markup)
+                    continue
+
+                if child.type == "text" and child.content:
+                    pos = token.content.find(child.content, search_pos)
+                    if pos >= 0:
+                        search_pos = pos + len(child.content)
+                    continue
+
+                if child.type == "softbreak":
+                    pos = token.content.find("\n", search_pos)
+                    if pos >= 0:
+                        search_pos = pos + 1
+                    continue
+
+                if child.type == "code_inline" and child.markup:
+                    pos = token.content.find(child.markup, search_pos)
+                    if pos >= 0:
+                        search_pos = pos + len(child.markup) * 2 + len(child.content)
+                    continue
+
+                if child.type == "strong_open":
+                    marker = child.markup
+                    if marker not in self.MARKUP_TO_STYLE:
+                        continue
+
+                    line, _, search_pos = self._find_marker_position(
+                        token.content, marker, search_pos, base_line
+                    )
+
+                    should_fix = self.MARKUP_TO_STYLE[marker] != expected_style
+                    fix_stack.append(should_fix)
+
+                    if should_fix:
+                        replacements_per_line[line] = replacements_per_line.get(line, 0) + 1
+                    continue
+
+                if child.type == "strong_close":
+                    marker = child.markup
+                    if marker not in self.MARKUP_TO_STYLE:
+                        continue
+
+                    line, _, search_pos = self._find_marker_position(
+                        token.content, marker, search_pos, base_line
+                    )
+
+                    should_fix = fix_stack.pop() if fix_stack else False
+                    if should_fix:
+                        replacements_per_line[line] = replacements_per_line.get(line, 0) + 1
+                    continue
+
+        if not replacements_per_line:
+            return None
+
+        lines = document.content.split("\n")
+        for line_num, count in replacements_per_line.items():
+            line_idx = line_num - 1
+            line = lines[line_idx]
+            search_from = 0
+            for _ in range(count):
+                pos = line.find(wrong_marker, search_from)
+                if pos < 0:
+                    break
+                line = line[:pos] + target_marker + line[pos + 2 :]
+                search_from = pos + 2
+            lines[line_idx] = line
+
+        return "\n".join(lines)
+
     @staticmethod
     def _find_marker_position(
         content: str, marker: str, search_pos: int, base_line: int

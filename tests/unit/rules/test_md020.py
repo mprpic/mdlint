@@ -181,3 +181,89 @@ class TestMD020:
         violations = rule.check(doc, config)
 
         assert len(violations) == 1
+
+    def test_fix_corrects_invalid(self, rule: MD020, config: MD020Config) -> None:
+        """Fix inserts spaces inside hashes in invalid headings."""
+        content = load_fixture("md020", "invalid.md")
+        doc = Document(Path("invalid.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading 1 #" in result
+        assert "## Heading 2 ##" in result
+        assert "### Heading 3 ###" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD020, config: MD020Config) -> None:
+        """Fix returns None when content is already valid."""
+        content = load_fixture("md020", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_missing_left_space(self, rule: MD020, config: MD020Config) -> None:
+        """Fix inserts space on left side only."""
+        content = load_fixture("md020", "missing_left_space.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading 1 #" in result
+        assert "## Heading 2 ##" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_missing_right_space(self, rule: MD020, config: MD020Config) -> None:
+        """Fix inserts space on right side only."""
+        content = load_fixture("md020", "missing_right_space.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading 1 #" in result
+        assert "## Heading 2 ##" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_ignores_code_blocks(self, rule: MD020, config: MD020Config) -> None:
+        """Fix does not modify lines inside code blocks."""
+        content = load_fixture("md020", "in_code_block.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_ignores_html_blocks(self, rule: MD020, config: MD020Config) -> None:
+        """Fix does not modify lines inside HTML blocks."""
+        content = "<div>\n#Heading#\n</div>\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_mismatched_hashes(self, rule: MD020, config: MD020Config) -> None:
+        """Fix handles mismatched opening/closing hash counts."""
+        content = load_fixture("md020", "mismatched_hashes.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading ##" in result
+        assert "## Heading #" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_single_char_heading(self, rule: MD020, config: MD020Config) -> None:
+        """Fix handles single character heading."""
+        content = "#a#\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert result == "# a #\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_trailing_whitespace(self, rule: MD020, config: MD020Config) -> None:
+        """Fix handles headings with trailing whitespace after closing hashes."""
+        content = "#Heading#   \n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "# Heading #" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

@@ -249,3 +249,75 @@ Check out [javascript][1] for more.
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_fix_corrects_invalid(self, rule: MD044, config: MD044Config) -> None:
+        """Fixing invalid content produces valid output."""
+        content = load_fixture("md044", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        # Verify the names are corrected
+        assert "JavaScript" in result
+        assert "GitHub" in result
+        assert "Python" in result
+        assert "javascript" not in result
+        assert "github" not in result
+        assert "python" not in result
+        # Verify no violations remain
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD044, config: MD044Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md044", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_multiple_on_same_line(self, rule: MD044) -> None:
+        """Fix handles multiple violations on the same line."""
+        content = "Use javascript and github together"
+        doc = Document(Path("test.md"), content)
+        config = MD044Config(names=["JavaScript", "GitHub"])
+        result = rule.fix(doc, config)
+        assert result == "Use JavaScript and GitHub together"
+
+    def test_fix_case_variants(self, rule: MD044) -> None:
+        """Fix handles different case variants."""
+        content = "JAVASCRIPT and Javascript and javascript"
+        doc = Document(Path("test.md"), content)
+        config = MD044Config(names=["JavaScript"])
+        result = rule.fix(doc, config)
+        assert result == "JavaScript and JavaScript and JavaScript"
+
+    def test_fix_preserves_code_blocks_when_excluded(self, rule: MD044) -> None:
+        """Fix does not modify code blocks when code_blocks=False."""
+        content = load_fixture("md044", "code_blocks.md")
+        doc = Document(Path("test.md"), content)
+        config = MD044Config(names=["JavaScript"], code_blocks=False)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_link_text_not_url(self, rule: MD044) -> None:
+        """Fix corrects link text but not URL."""
+        content = "[javascript guide](https://javascript.info)"
+        doc = Document(Path("test.md"), content)
+        config = MD044Config(names=["JavaScript"])
+        result = rule.fix(doc, config)
+        assert result == "[JavaScript guide](https://javascript.info)"
+
+    def test_fix_no_names_configured(self, rule: MD044) -> None:
+        """Fix returns None when no names are configured."""
+        content = "This has javascript mentions."
+        doc = Document(Path("test.md"), content)
+        config = MD044Config()
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_special_characters_in_name(self, rule: MD044) -> None:
+        """Fix handles names with special characters."""
+        content = "Visit Github.com for more info."
+        doc = Document(Path("test.md"), content)
+        config = MD044Config(names=["github.com"])
+        result = rule.fix(doc, config)
+        assert result == "Visit github.com for more info."

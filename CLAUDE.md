@@ -92,6 +92,11 @@ Uses `markdown-it-py` for token-based parsing. The `Document` class provides:
 - `tokens`: Parsed markdown-it tokens
 - `lines`: Content split by lines (1-indexed via `get_line()`)
 - `front_matter`: Extracted YAML/TOML front matter
+- `code_block_lines`: (cached) `set[int]` of 1-indexed line numbers inside fenced/indented code blocks
+- `html_block_lines`: (cached) `set[int]` of 1-indexed line numbers inside HTML blocks
+- `code_span_positions`: (cached) `dict[int, set[int]]` mapping line numbers to 1-indexed column positions inside
+  inline code spans
+- `reference_definitions`: (cached) `dict[str, str]` mapping lowercase reference IDs to destinations
 
 ### Configuration
 
@@ -130,13 +135,13 @@ both files and directories, respecting `.gitignore` patterns by default.
 
 ## Base Class Helpers
 
-The `Rule` base class in `rules/base.py` provides shared helper methods for use in rule implementations:
+The `Rule` base class in `rules/base.py` provides:
 
-- `_get_code_block_lines(document)` — returns `set[int]` of 1-indexed line numbers inside fenced/indented code blocks
 - `_overlaps_ranges(start, end, ranges)` — checks if a 0-indexed position range overlaps with any existing ranges
-- `_get_code_span_positions(document)` — returns `dict[int, set[int]]` mapping line numbers to sets of 1-indexed
-  positions inside inline code spans (AST-based)
-- `_get_reference_definitions(document)` — returns `dict[str, str]` mapping lowercase reference IDs to destinations
+- `REFERENCE_DEF_PATTERN` — compiled regex for matching reference definition lines
+
+Document-level cached properties (`code_block_lines`, `code_span_positions`, etc.) are accessed directly on the
+`document` object — see Document Parsing above.
 
 ## Adding a New Rule
 

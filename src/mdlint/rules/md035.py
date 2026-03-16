@@ -70,35 +70,63 @@ More text here.
 Final section.
 """
 
+    def _get_expected_style(self, document: Document, config: MD035Config) -> str | None:
+        """Determine the expected HR style from config or the first HR in the document."""
+        if config.style != "consistent":
+            return config.style
+        for token in document.tokens:
+            if token.type == "hr":
+                line = token.map[0] + 1 if token.map else 1
+                raw_line = document.get_line(line)
+                return raw_line.strip() if raw_line else ""
+        return None
+
     def check(self, document: Document, config: MD035Config) -> list[Violation]:
         """Check for horizontal rule style consistency."""
         violations: list[Violation] = []
 
-        style = config.style
-        expected_style: str | None = None if style == "consistent" else style
+        expected_style = self._get_expected_style(document, config)
 
         for token in document.tokens:
             if token.type == "hr":
                 line = token.map[0] + 1 if token.map else 1
-                # Get actual horizontal rule text from the raw line
                 raw_line = document.get_line(line)
                 current_style = raw_line.strip() if raw_line else ""
 
-                # For consistent mode, set expected from first horizontal rule
-                if expected_style is None:
-                    expected_style = current_style
+                # For consistent mode, skip the first HR (it sets the style)
+                if current_style == expected_style:
                     continue
 
-                if current_style != expected_style:
-                    violations.append(
-                        Violation(
-                            line=line,
-                            column=1,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=f"Expected '{expected_style}', found '{current_style}'",
-                            context=raw_line,
-                        )
+                violations.append(
+                    Violation(
+                        line=line,
+                        column=1,
+                        rule_id=self.id,
+                        rule_name=self.name,
+                        message=f"Expected '{expected_style}', found '{current_style}'",
+                        context=raw_line,
                     )
+                )
 
         return violations
+
+    def fix(self, document: Document, config: MD035Config) -> str | None:
+        """Fix horizontal rules to use a consistent style."""
+        violations = self.check(document, config)
+        if not violations:
+            return None
+
+        expected_style = self._get_expected_style(document, config)
+        if expected_style is None:
+            return None
+
+        violation_lines = {v.line for v in violations}
+        lines = document.content.split("\n")
+        for line_num in violation_lines:
+            raw_line = lines[line_num - 1]
+            # Preserve leading whitespace
+            stripped = raw_line.lstrip()
+            leading = raw_line[: len(raw_line) - len(stripped)]
+            lines[line_num - 1] = leading + expected_style
+
+        return "\n".join(lines)

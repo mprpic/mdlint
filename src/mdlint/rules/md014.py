@@ -66,60 +66,79 @@ $ less bar
 
     DOLLAR_COMMAND_RE = re.compile(r"^(\s*)(\$\s+)")
 
-    def check(self, document: Document, config: MD014Config) -> list[Violation]:
-        """Check for unnecessary dollar signs in code blocks."""
-        violations: list[Violation] = []
+    def _find_dollar_blocks(self, document: Document) -> list[tuple[int, int, list[str]]]:
+        """Find code blocks where all non-empty lines start with a dollar sign.
+
+        Returns a list of (content_start, content_end, content_lines) tuples where
+        content_start and content_end are 0-indexed line indices into the document.
+        """
+        results: list[tuple[int, int, list[str]]] = []
 
         for token in document.tokens:
-            # Check both fenced and indented code blocks
             if token.type not in ("fence", "code_block"):
                 continue
 
             if not token.content or not token.map:
                 continue
 
-            lines = token.content.split("\n")
-            # Filter out empty lines for analysis
-            non_empty_lines = [line for line in lines if line.strip()]
+            content_lines = token.content.split("\n")
+            non_empty_lines = [line for line in content_lines if line.strip()]
 
             if not non_empty_lines:
                 continue
 
-            # Check if all non-empty lines match the dollar sign pattern
-            dollar_matches = []
-            for line in non_empty_lines:
-                match = self.DOLLAR_COMMAND_RE.match(line)
-                dollar_matches.append(match)
+            if not all(self.DOLLAR_COMMAND_RE.match(line) for line in non_empty_lines):
+                continue
 
-            # Only report violations if ALL non-empty lines start with $ prompt
-            if all(match is not None for match in dollar_matches):
-                # Calculate the starting line number for content
-                # For fenced blocks, content starts after the opening fence
-                # For indented code blocks, content starts at map[0]
-                if token.type == "fence":
-                    content_start_line = token.map[0] + 2  # +1 for 0-index, +1 for fence line
-                else:
-                    content_start_line = token.map[0] + 1
+            if token.type == "fence":
+                content_start = token.map[0] + 1  # line after opening fence
+                content_end = token.map[1] - 1  # exclude closing fence
+            else:
+                content_start = token.map[0]
+                content_end = token.map[1]
 
-                # Report a violation for each line with a dollar sign
-                current_line = content_start_line
-                for line in lines:
-                    if line.strip():  # Only check non-empty lines
-                        match = self.DOLLAR_COMMAND_RE.match(line)
-                        if match:
-                            # Column is after the leading whitespace
-                            column = len(match.group(1)) + 1
-                            msg = "Dollar sign before command without output"
-                            violations.append(
-                                Violation(
-                                    line=current_line,
-                                    column=column,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message=msg,
-                                    context=document.get_line(current_line),
-                                )
+            results.append((content_start, content_end, content_lines))
+
+        return results
+
+    def check(self, document: Document, config: MD014Config) -> list[Violation]:
+        """Check for unnecessary dollar signs in code blocks."""
+        violations: list[Violation] = []
+
+        for content_start, content_end, content_lines in self._find_dollar_blocks(document):
+            # content_start is 0-indexed; violation lines are 1-indexed
+            current_line = content_start + 1
+            for line in content_lines:
+                if line.strip():
+                    match = self.DOLLAR_COMMAND_RE.match(line)
+                    if match:
+                        column = len(match.group(1)) + 1
+                        violations.append(
+                            Violation(
+                                line=current_line,
+                                column=column,
+                                rule_id=self.id,
+                                rule_name=self.name,
+                                message="Dollar sign before command without output",
+                                context=document.get_line(current_line),
                             )
-                    current_line += 1
+                        )
+                current_line += 1
 
         return violations
+
+    def fix(self, document: Document, config: MD014Config) -> str | None:
+        """Fix by removing unnecessary dollar sign prefixes from code blocks."""
+        dollar_blocks = self._find_dollar_blocks(document)
+        if not dollar_blocks:
+            return None
+
+        lines = document.content.split("\n")
+
+        for content_start, content_end, _ in dollar_blocks:
+            for i in range(content_start, content_end):
+                match = self.DOLLAR_COMMAND_RE.match(lines[i])
+                if match:
+                    lines[i] = match.group(1) + lines[i][match.end() :]
+
+        return "\n".join(lines)

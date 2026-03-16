@@ -395,3 +395,131 @@ Bad link: [test](#missing)
 
         assert len(violations) == 1
         assert "#fake-anchor" in violations[0].message
+
+
+class TestMD051Fix:
+    @pytest.fixture
+    def rule(self) -> MD051:
+        return MD051()
+
+    @pytest.fixture
+    def config(self) -> MD051Config:
+        return MD051Config()
+
+    def test_fix_returns_none_for_valid(self, rule: MD051, config: MD051Config) -> None:
+        """Fixing already-valid content returns None."""
+        content = load_fixture("md051", "valid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_case_mismatch(self, rule: MD051, config: MD051Config) -> None:
+        """Fix corrects case-mismatched link fragments."""
+        content = """\
+# My Heading
+
+[Link](#My-Heading)
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert "[Link](#my-heading)" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_leaves_nonexistent_fragments(self, rule: MD051, config: MD051Config) -> None:
+        """Fix does not change non-existent fragment links."""
+        content = load_fixture("md051", "invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_multiple_case_mismatches(self, rule: MD051, config: MD051Config) -> None:
+        """Fix corrects multiple case-mismatched fragments."""
+        content = """\
+# First Heading
+
+## Second Heading
+
+[Link 1](#First-Heading)
+[Link 2](#Second-Heading)
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert "[Link 1](#first-heading)" in result
+        assert "[Link 2](#second-heading)" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_reference_definition_case_mismatch(self, rule: MD051, config: MD051Config) -> None:
+        """Fix corrects case-mismatched reference definition fragments."""
+        content = """\
+# Heading
+
+[Link][ref]
+
+[ref]: #Heading
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert "[ref]: #heading" in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_skips_code_blocks(self, rule: MD051, config: MD051Config) -> None:
+        """Fix does not modify links inside code blocks."""
+        content = """\
+# Heading
+
+```markdown
+[Link](#Heading)
+```
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_skips_inline_code(self, rule: MD051, config: MD051Config) -> None:
+        """Fix does not modify links inside inline code spans."""
+        content = """\
+# Heading
+
+Use `[Link](#Heading)` as example.
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is None
+
+    def test_fix_mixed_valid_and_case_mismatch(self, rule: MD051, config: MD051Config) -> None:
+        """Fix only corrects case mismatches, leaving valid and non-existent links alone."""
+        content = """\
+# Heading
+
+[Valid](#heading)
+[Case mismatch](#Heading)
+[Non-existent](#missing)
+"""
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert "[Valid](#heading)" in result
+        assert "[Case mismatch](#heading)" in result
+        assert "[Non-existent](#missing)" in result

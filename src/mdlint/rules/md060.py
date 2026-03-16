@@ -359,6 +359,251 @@ class MD060(Rule[MD060Config]):
 
         return compact_violations, tight_violations
 
+    def fix(self, document: Document, config: MD060Config) -> str | None:
+        """Fix table column style by reformatting tables."""
+        tables = self._find_tables(document)
+        if not tables:
+            return None
+
+        lines = document.content.split("\n")
+        changed = False
+
+        for start_line, end_line in tables:
+            rows: list[tuple[int, str]] = []
+            for line_num in range(start_line, end_line + 1):
+                line = document.get_line(line_num)
+                if line is not None:
+                    rows.append((line_num, line))
+
+            if len(rows) < 2:
+                continue
+
+            style = config.style
+            if style == "any":
+                # Determine best style and skip if no violations
+                style, error_count = self._determine_best_style(
+                    document, rows, config.aligned_delimiter
+                )
+                if error_count == 0:
+                    continue
+            else:
+                # Skip tables with no violations for the specific style
+                table_violations = self._check_table(
+                    document, (start_line, end_line), style, config.aligned_delimiter
+                )
+                if not table_violations:
+                    continue
+
+            # Parse all rows into cells
+            parsed: list[tuple[int, list[str], bool, bool, bool]] = []
+            for line_num, line in rows:
+                cells, has_leading, has_trailing = self._split_cells(line)
+                is_delim = self._is_delimiter_cells(cells)
+                parsed.append((line_num, cells, has_leading, has_trailing, is_delim))
+
+            # Calculate column widths for aligned style
+            col_widths: list[int] | None = None
+            if style == "aligned":
+                col_widths = self._calc_col_widths(parsed)
+
+            # Calculate header cell widths for aligned_delimiter option
+            delim_widths: list[int] | None = None
+            if config.aligned_delimiter and style in ("compact", "tight") and parsed:
+                header_cells = parsed[0][1]
+                delim_widths = [self._visual_width(c) for c in header_cells]
+
+            # Format each row
+            for line_num, cells, has_leading, has_trailing, is_delim in parsed:
+                new_line = self._build_table_line(
+                    cells,
+                    has_leading,
+                    has_trailing,
+                    style,
+                    col_widths=col_widths,
+                    delim_widths=delim_widths if is_delim else None,
+                    is_delim=is_delim,
+                )
+                if lines[line_num - 1] != new_line:
+                    lines[line_num - 1] = new_line
+                    changed = True
+
+        return "\n".join(lines) if changed else None
+
+    def _determine_best_style(
+        self,
+        document: Document,
+        rows: list[tuple[int, str]],
+        aligned_delimiter: bool,
+    ) -> tuple[str, int]:
+        """Determine which style produces fewest violations for a table.
+
+        Returns:
+            Tuple of (best_style_name, error_count).
+        """
+        errors_aligned = len(self._check_aligned_style(document, rows))
+
+        if errors_aligned == 0:
+            return "aligned", 0
+
+        errors_compact = 0
+        errors_tight = 0
+
+        if aligned_delimiter and len(rows) >= 2:
+            delim_errs = len(
+                self._check_aligned_style(document, rows[:2], message=self.MSG_ALIGNED_DELIMITER)
+            )
+            errors_compact += delim_errs
+            errors_tight += delim_errs
+
+        for line_num, line in rows:
+            compact_errs, tight_errs = self._check_compact_tight_style(document, line_num, line)
+            errors_compact += len(compact_errs)
+            errors_tight += len(tight_errs)
+
+        candidates = [
+            (errors_aligned, "aligned"),
+            (errors_compact, "compact"),
+            (errors_tight, "tight"),
+        ]
+        best = min(candidates, key=lambda x: x[0])
+        return best[1], best[0]
+
+    @staticmethod
+    def _split_cells(line: str) -> tuple[list[str], bool, bool]:
+        """Split a table line into trimmed cell contents.
+
+        Returns:
+            Tuple of (cells, has_leading_pipe, has_trailing_pipe).
+        """
+        stripped = line.strip()
+        has_leading = stripped.startswith("|")
+        has_trailing = len(stripped) > 1 and stripped.endswith("|")
+
+        cells: list[str] = []
+        current: list[str] = []
+        i = 0
+        while i < len(stripped):
+            if stripped[i] == "\\" and i + 1 < len(stripped) and stripped[i + 1] == "|":
+                current.append("\\|")
+                i += 2
+            elif stripped[i] == "|":
+                cells.append("".join(current))
+                current = []
+                i += 1
+            else:
+                current.append(stripped[i])
+                i += 1
+        cells.append("".join(current))
+
+        # Remove empty entries from leading/trailing pipes
+        if has_leading and cells and cells[0].strip() == "":
+            cells = cells[1:]
+        if has_trailing and cells and cells[-1].strip() == "":
+            cells = cells[:-1]
+
+        cells = [c.strip() for c in cells]
+        return cells, has_leading, has_trailing
+
+    @staticmethod
+    def _is_delimiter_cells(cells: list[str]) -> bool:
+        """Check if cells represent a delimiter row."""
+        return bool(cells) and all(c and set(c) <= {"-", ":"} and "-" in c for c in cells)
+
+    def _calc_col_widths(self, parsed: list[tuple[int, list[str], bool, bool, bool]]) -> list[int]:
+        """Calculate max visual width per column (excluding delimiter rows)."""
+        max_widths: list[int] = []
+        for _, cells, _, _, is_delim in parsed:
+            if is_delim:
+                continue
+            for i, cell in enumerate(cells):
+                w = self._visual_width(cell)
+                if i >= len(max_widths):
+                    max_widths.append(w)
+                else:
+                    max_widths[i] = max(max_widths[i], w)
+        return max_widths
+
+    def _build_table_line(
+        self,
+        cells: list[str],
+        has_leading: bool,
+        has_trailing: bool,
+        style: str,
+        col_widths: list[int] | None = None,
+        delim_widths: list[int] | None = None,
+        is_delim: bool = False,
+    ) -> str:
+        """Build a formatted table line from parsed cells."""
+        n = len(cells)
+        parts: list[str] = []
+
+        for i, cell in enumerate(cells):
+            is_first = i == 0
+            is_last = i == n - 1
+
+            # Determine formatted content
+            if is_delim and delim_widths and i < len(delim_widths):
+                content = self._format_delimiter_cell(cell, delim_widths[i])
+            elif is_delim and style == "aligned" and col_widths and i < len(col_widths):
+                content = self._format_delimiter_cell(cell, col_widths[i])
+            elif style == "aligned" and col_widths and i < len(col_widths):
+                padding = col_widths[i] - self._visual_width(cell)
+                content = cell + " " * max(padding, 0)
+            else:
+                content = cell
+
+            # Apply spacing
+            if style == "tight":
+                parts.append(content)
+            else:  # compact or aligned
+                has_left_pipe = has_leading or not is_first
+                has_right_pipe = has_trailing or not is_last
+                if content == "" and not is_delim:
+                    parts.append(" " if (has_left_pipe or has_right_pipe) else "")
+                else:
+                    left = " " if has_left_pipe else ""
+                    right = " " if has_right_pipe else ""
+                    parts.append(f"{left}{content}{right}")
+
+        result = "|".join(parts)
+        if has_leading:
+            result = "|" + result
+        if has_trailing:
+            result = result + "|"
+        return result
+
+    @staticmethod
+    def _format_delimiter_cell(cell: str, width: int) -> str:
+        """Format a delimiter cell to the specified width, preserving alignment markers."""
+        left_colon = cell.startswith(":")
+        right_colon = cell.endswith(":")
+
+        dash_count = width
+        if left_colon:
+            dash_count -= 1
+        if right_colon:
+            dash_count -= 1
+        dash_count = max(dash_count, 1)
+
+        result = ""
+        if left_colon:
+            result += ":"
+        result += "-" * dash_count
+        if right_colon:
+            result += ":"
+        return result
+
+    @staticmethod
+    def _visual_width(text: str) -> int:
+        """Calculate the visual width of text, accounting for wide characters."""
+        width = 0
+        for char in text:
+            if unicodedata.east_asian_width(char) in ("W", "F"):
+                width += 2
+            else:
+                width += 1
+        return width
+
     @staticmethod
     def _get_pipe_info(line: str) -> list[tuple[int, int]]:
         """Get character index and visual position of unescaped pipes.
@@ -377,9 +622,5 @@ class MD060(Rule[MD060Config]):
         for i, char in enumerate(line):
             if char == "|" and (i == 0 or line[i - 1] != "\\"):
                 result.append((i, visual_pos))
-            # CJK and fullwidth characters take 2 visual columns
-            if unicodedata.east_asian_width(char) in ("W", "F"):
-                visual_pos += 2
-            else:
-                visual_pos += 1
+            visual_pos += MD060._visual_width(char)
         return result

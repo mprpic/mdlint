@@ -84,43 +84,26 @@ Another table with the same style:
         """Check for table pipe style consistency."""
         violations: list[Violation] = []
 
-        style = config.style
-
-        # Track expected style (for consistent mode)
-        expected_leading: bool | None = None
-        expected_trailing: bool | None = None
-
-        if style == "leading_and_trailing":
-            expected_leading = True
-            expected_trailing = True
-        elif style == "leading_only":
-            expected_leading = True
-            expected_trailing = False
-        elif style == "trailing_only":
-            expected_leading = False
-            expected_trailing = True
-        elif style == "no_leading_or_trailing":
-            expected_leading = False
-            expected_trailing = False
-        # For "consistent", we'll determine from first row
-
-        # Find all table rows
         table_rows = MD055._get_table_rows(document)
+        if not table_rows:
+            return violations
 
-        for line_num in table_rows:
+        expected_leading, expected_trailing = self._resolve_expected_style(
+            document, config, table_rows
+        )
+        if expected_leading is None:
+            return violations
+
+        # In "consistent" mode, skip the first row (it defines the style)
+        start = 1 if config.style == "consistent" else 0
+
+        for line_num in table_rows[start:]:
             line_content = document.get_line(line_num)
             if line_content is None:
                 continue
 
             has_leading, has_trailing = self._check_pipe_style(line_content)
 
-            # Set expected style from first row (consistent mode)
-            if expected_leading is None:
-                expected_leading = has_leading
-                expected_trailing = has_trailing
-                continue
-
-            # Check for violations
             if has_leading != expected_leading:
                 if expected_leading:
                     message = "Missing leading pipe"
@@ -154,6 +137,99 @@ Another table with the same style:
                 )
 
         return violations
+
+    def fix(self, document: Document, config: MD055Config) -> str | None:
+        """Fix table pipe style by adding or removing leading/trailing pipes."""
+        table_rows = MD055._get_table_rows(document)
+        if not table_rows:
+            return None
+
+        expected_leading, expected_trailing = self._resolve_expected_style(
+            document, config, table_rows
+        )
+        if expected_leading is None:
+            return None
+
+        lines = document.content.split("\n")
+        changed = False
+
+        for line_num in table_rows:
+            line = lines[line_num - 1]
+            has_leading, has_trailing = self._check_pipe_style(line)
+
+            if has_leading == expected_leading and has_trailing == expected_trailing:
+                continue
+
+            prefix, content = self._split_blockquote_prefix(line)
+
+            if not has_leading and expected_leading:
+                content = "| " + content.lstrip()
+            elif has_leading and not expected_leading:
+                content = content.lstrip()
+                if content.startswith("|"):
+                    content = content[1:].lstrip() if len(content) > 1 else ""
+
+            if not has_trailing and expected_trailing:
+                content = content.rstrip() + " |"
+            elif has_trailing and not expected_trailing:
+                content = content.rstrip()
+                if content.endswith("|"):
+                    content = content[:-1].rstrip()
+
+            lines[line_num - 1] = prefix + content
+            changed = True
+
+        return "\n".join(lines) if changed else None
+
+    def _resolve_expected_style(
+        self,
+        document: Document,
+        config: MD055Config,
+        table_rows: list[int],
+    ) -> tuple[bool | None, bool | None]:
+        """Determine the expected leading/trailing pipe style.
+
+        Returns:
+            Tuple of (expected_leading, expected_trailing), or (None, None)
+            if no table rows exist.
+        """
+        style = config.style
+        if style == "leading_and_trailing":
+            return True, True
+        if style == "leading_only":
+            return True, False
+        if style == "trailing_only":
+            return False, True
+        if style == "no_leading_or_trailing":
+            return False, False
+        # "consistent" — derive from first row
+        first_line = document.get_line(table_rows[0])
+        if first_line is None:
+            return None, None
+        return self._check_pipe_style(first_line)
+
+    @staticmethod
+    def _split_blockquote_prefix(line: str) -> tuple[str, str]:
+        """Split a line into its blockquote prefix and remaining content.
+
+        Returns:
+            Tuple of (prefix, content) where prefix includes blockquote
+            markers and their trailing whitespace.
+        """
+        i = 0
+        # Skip leading whitespace
+        while i < len(line) and line[i] == " ":
+            i += 1
+        # Consume blockquote markers
+        bq_start = i
+        while i < len(line) and line[i] == ">":
+            i += 1
+            # Skip space after >
+            if i < len(line) and line[i] == " ":
+                i += 1
+        if i == bq_start:
+            return ("", line)
+        return (line[:i], line[i:])
 
     @staticmethod
     def _get_table_rows(document: Document) -> list[int]:
@@ -190,10 +266,8 @@ Another table with the same style:
         Returns:
             Tuple of (has_leading_pipe, has_trailing_pipe).
         """
-        stripped = line.strip()
-        # Strip blockquote prefixes (e.g., "> ", ">> ")
-        while stripped.startswith(">"):
-            stripped = stripped[1:].lstrip()
+        _, content = MD055._split_blockquote_prefix(line)
+        stripped = content.strip()
         has_leading = stripped.startswith("|")
         has_trailing = stripped.endswith("|")
         return has_leading, has_trailing

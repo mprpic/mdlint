@@ -153,3 +153,62 @@ class TestMD026:
 
         assert len(violations) == 1
         assert ";" in violations[0].message
+
+    def test_fix_corrects_invalid(self, rule: MD026, config: MD026Config) -> None:
+        """Fix removes trailing punctuation from headings."""
+        content = load_fixture("md026", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_returns_none_for_valid(self, rule: MD026, config: MD026Config) -> None:
+        """Fix returns None when no violations exist."""
+        content = load_fixture("md026", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_closing_atx_hashes(self, rule: MD026, config: MD026Config) -> None:
+        """Fix removes punctuation before closing ATX hashes."""
+        content = "## Heading with period. ##\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "## Heading with period ##\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_setext_heading(self, rule: MD026, config: MD026Config) -> None:
+        """Fix removes trailing punctuation from setext headings."""
+        content = "Heading text.\n===\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Heading text\n===\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_preserves_html_entities(self, rule: MD026, config: MD026Config) -> None:
+        """Fix does not remove semicolons from HTML entities."""
+        content = "# Heading with &copy;\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_empty_punctuation(self, rule: MD026) -> None:
+        """Fix returns None when punctuation config is empty."""
+        config = MD026Config(punctuation="")
+        content = "# Heading with period.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_custom_punctuation(self, rule: MD026) -> None:
+        """Fix respects custom punctuation configuration."""
+        config = MD026Config(punctuation="?")
+        content = "# Is this a question?\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Is this a question\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

@@ -173,3 +173,67 @@ class TestMD035:
 
         assert len(violations) == 1
         assert violations[0].context == "***"
+
+    def test_fix_returns_none_for_valid(self, rule: MD035, config: MD035Config) -> None:
+        """Fixing valid document returns None."""
+        content = load_fixture("md035", "valid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_corrects_invalid(self, rule: MD035, config: MD035Config) -> None:
+        """Fixing invalid document normalizes horizontal rules."""
+        content = load_fixture("md035", "invalid.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        # The second HR (***) should become ---
+        assert "***" not in result
+        assert result.count("---") == 2
+
+    def test_fix_multiple_inconsistent(self, rule: MD035, config: MD035Config) -> None:
+        """Fix normalizes multiple inconsistent rules to the first style."""
+        content = "Text\n\n---\n\nMore\n\n***\n\nEven more\n\n- - -\n\nEnd\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+
+    def test_fix_specific_style(self, rule: MD035) -> None:
+        """Fix with specific style replaces non-matching rules."""
+        config = MD035Config(style="***")
+        content = "Text\n\n---\n\nMore\n\n***\n\nEnd\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert "---" not in result
+
+    def test_fix_no_horizontal_rules(self, rule: MD035, config: MD035Config) -> None:
+        """Fix returns None when there are no horizontal rules."""
+        content = "# Heading\n\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_single_horizontal_rule(self, rule: MD035, config: MD035Config) -> None:
+        """Fix returns None for a single horizontal rule."""
+        content = "# Heading\n\n---\n\nSome text.\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
+    def test_fix_preserves_leading_whitespace(self, rule: MD035, config: MD035Config) -> None:
+        """Fix preserves leading whitespace on horizontal rules."""
+        content = "Text\n\n   ---\n\nMore\n\n   ***\n\nEnd\n"
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "   ---" in result
+        assert "   ***" not in result
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.check(fixed_doc, config) == []

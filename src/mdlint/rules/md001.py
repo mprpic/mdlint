@@ -107,3 +107,65 @@ class MD001(Rule[MD001Config]):
                 prev_level = level
 
         return violations
+
+    def fix(self, document: Document, config: MD001Config) -> str | None:
+        """Fix heading increment violations by adjusting heading levels."""
+        # Collect heading info: (token_index, line_0indexed, current_level, token_tag)
+        headings: list[tuple[int, int, int, str]] = []
+        for i, token in enumerate(document.tokens):
+            if token.type == "heading_open":
+                level = int(token.tag[1])
+                line = token.map[0] if token.map else 0
+                headings.append((i, line, level, token.tag))
+
+        if not headings:
+            return None
+
+        # Determine the expected level for each heading
+        prev_level: int | None = None
+        if (
+            config.front_matter_title
+            and document.front_matter
+            and re.search(config.front_matter_title, document.front_matter, re.MULTILINE)
+        ):
+            prev_level = 1
+
+        adjustments: list[tuple[int, int, int]] = []  # (line_0indexed, old_level, new_level)
+        for _, line, level, _ in headings:
+            if prev_level is not None and level > prev_level + 1:
+                new_level = prev_level + 1
+                adjustments.append((line, level, new_level))
+                prev_level = new_level
+            else:
+                prev_level = level
+
+        if not adjustments:
+            return None
+
+        lines = document.content.split("\n")
+        for line_idx, _, new_level in reversed(adjustments):
+            line = lines[line_idx]
+            # ATX heading: starts with # characters
+            atx_match = re.match(r"^(#{1,6})(\s)", line)
+            if atx_match:
+                lines[line_idx] = "#" * new_level + line[len(atx_match.group(1)) :]
+            else:
+                # Setext heading: the underline is on the next line
+                # Setext h1 uses ===, h2 uses ---
+                # If new_level <= 2, keep setext style; otherwise convert to ATX
+                if new_level <= 2:
+                    underline_char = "=" if new_level == 1 else "-"
+                    underline_line = line_idx + 1
+                    if underline_line < len(lines):
+                        old_underline = lines[underline_line]
+                        lines[underline_line] = underline_char * len(old_underline)
+                else:
+                    # Convert setext to ATX
+                    heading_text = line
+                    lines[line_idx] = "#" * new_level + " " + heading_text
+                    # Remove the underline
+                    underline_line = line_idx + 1
+                    if underline_line < len(lines):
+                        lines.pop(underline_line)
+
+        return "\n".join(lines)

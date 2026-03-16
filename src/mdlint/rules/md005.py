@@ -169,3 +169,78 @@ class MD005(Rule[MD005Config]):
             if not char.isdigit():
                 return 0
         return 0
+
+    def fix(self, document: Document, config: MD005Config) -> str | None:
+        """Fix inconsistent list indentation by adjusting leading whitespace."""
+        lines = document.content.split("\n")
+        # Maps 0-indexed line number to the new indentation level
+        fixes: dict[int, int] = {}
+        list_stack: list[_ListState] = []
+
+        for token in document.tokens:
+            if token.type in ("bullet_list_open", "ordered_list_open"):
+                list_stack.append(_ListState(is_ordered=(token.type == "ordered_list_open")))
+            elif token.type in ("bullet_list_close", "ordered_list_close"):
+                if list_stack:
+                    list_stack.pop()
+            elif token.type == "list_item_open" and token.map and list_stack:
+                line_num = token.map[0] + 1
+                line_content = document.get_line(line_num)
+
+                if line_content is None:
+                    continue
+
+                indent = len(line_content) - len(line_content.lstrip())
+                current_list = list_stack[-1]
+
+                if current_list.is_ordered:
+                    new_indent = self._fix_ordered_item(current_list, indent, line_content)
+                else:
+                    new_indent = self._fix_unordered_item(current_list, indent)
+
+                if new_indent is not None:
+                    fixes[line_num - 1] = new_indent
+
+        if not fixes:
+            return None
+
+        for line_idx, new_indent in fixes.items():
+            old_line = lines[line_idx]
+            stripped = old_line.lstrip()
+            lines[line_idx] = " " * new_indent + stripped
+
+        return "\n".join(lines)
+
+    def _fix_unordered_item(self, state: _ListState, indent: int) -> int | None:
+        """Return new indent if this item needs fixing, else None."""
+        if state.expected_indent is None:
+            state.expected_indent = indent
+            return None
+
+        if state.expected_indent != indent:
+            return state.expected_indent
+        return None
+
+    def _fix_ordered_item(self, state: _ListState, indent: int, line_content: str) -> int | None:
+        """Return new indent if this ordered item needs fixing, else None."""
+        marker_len = self._get_marker_length(line_content)
+        actual_end = indent + marker_len
+
+        if state.expected_indent is None:
+            state.expected_indent = indent
+            state.expected_end = actual_end
+            return None
+
+        if state.expected_indent != indent or state.end_matching:
+            if state.expected_end == actual_end:
+                state.end_matching = True
+                return None
+
+            if state.end_matching and state.expected_end is not None:
+                # Right-aligned: adjust indent so marker end matches expected_end
+                new_indent = max(0, state.expected_end - marker_len)
+                return new_indent
+
+            return state.expected_indent
+
+        return None
