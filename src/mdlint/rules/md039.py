@@ -38,6 +38,8 @@ This is a [properly formatted link](https://www.example.com/).
 
 Here is [another link](https://example.org/page) in a sentence.
 
+Links with inline code [`TextArea` documentation](https://example.com/) are fine.
+
 Reference links [like this][ref] are also fine.
 
 [ref]: https://example.com/reference
@@ -74,16 +76,11 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
             while i < len(children):
                 if children[i].type == "link_open":
                     i += 1
-                    first_text = None
-                    last_text = None
                     raw_parts: list[str] = []
 
                     while i < len(children) and children[i].type != "link_close":
                         child = children[i]
                         if child.type == "text":
-                            if first_text is None:
-                                first_text = child
-                            last_text = child
                             raw_parts.append(child.content)
                         elif child.type in (
                             "em_open",
@@ -114,12 +111,9 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                         line_num = token.map[0] + 1
                         column = 1
 
-                    if first_text is not None:
-                        has_leading = first_text.content != first_text.content.lstrip()
-                        has_trailing = (
-                            last_text is not None
-                            and last_text.content != last_text.content.rstrip()
-                        )
+                    if raw_text:
+                        has_leading = raw_text != raw_text.lstrip(" ")
+                        has_trailing = raw_text != raw_text.rstrip(" ")
 
                         if has_leading or has_trailing:
                             yield line_num, column, raw_text, has_leading, has_trailing

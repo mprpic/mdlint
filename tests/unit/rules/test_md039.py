@@ -228,6 +228,26 @@ class TestMD039:
         result = rule.fix(doc, config)
         assert result is None
 
+    def test_valid_multiline_links(self, rule: MD039, config: MD039Config) -> None:
+        """Multi-line links without spacing issues pass the rule."""
+        content = load_fixture("md039", "valid_multiline.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_invalid_multiline_links(self, rule: MD039, config: MD039Config) -> None:
+        """Multi-line links with leading/trailing spaces are detected."""
+        content = load_fixture("md039", "invalid_multiline.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 2
+        assert "leading" in violations[0].message.lower()
+        assert "trailing" in violations[1].message.lower()
+
     def test_fix_reference_links(self, rule: MD039, config: MD039Config) -> None:
         """Fix handles reference style links."""
         content = "[ link text ][ref]\n\n[ref]: https://example.com"
