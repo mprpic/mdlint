@@ -23,13 +23,13 @@ class MD034(Rule[MD034Config]):
     description = (
         "This rule is triggered when a URL or email address appears in the "
         "document without being enclosed in angle brackets, link syntax, or "
-        "code spans. URLs using http, https, and ftp protocols are checked."
+        "code spans. URLs using `http`, `https`, and `ftp` protocols are checked."
     )
 
     rationale = (
         "Without angle brackets, a bare URL or email address is not converted "
         "into a clickable link by some Markdown parsers. Wrapping URLs in "
-        "angle brackets (<url>) or using proper link syntax ensures consistent "
+        "angle brackets (`<url>`) or using proper link syntax ensures consistent "
         "rendering across different Markdown processors."
     )
 
