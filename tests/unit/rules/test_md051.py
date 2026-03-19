@@ -187,6 +187,15 @@ class TestMD051:
 
         assert len(violations) == 0
 
+    def test_heading_with_nbsp(self, rule: MD051, config: MD051Config) -> None:
+        """Non-breaking space in heading is treated as a regular space."""
+        content = "# Data\u00a0wrangling\n\n[Link](#data-wrangling)\n"
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_external_link_ignored(self, rule: MD051, config: MD051Config) -> None:
         """External links (not starting with #) are ignored."""
         content = """\

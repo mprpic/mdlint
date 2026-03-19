@@ -228,6 +228,15 @@ Some text.
         assert violations[1].column == 4
         assert "i" in violations[1].message
 
+    def test_autolinks_not_flagged(self, rule: MD033, config: MD033Config) -> None:
+        """Autolinks in angle brackets are not flagged as HTML elements."""
+        content = load_fixture("md033", "autolinks.md")
+        doc = Document(Path("autolinks.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_table_allowed_elements(self, rule: MD033) -> None:
         """table_allowed_elements allows specific elements only in tables."""
         content = load_fixture("md033", "table.md")

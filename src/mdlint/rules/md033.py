@@ -71,9 +71,9 @@ Some text with <span>inline HTML</span> inside.
 
     # Pattern to match opening HTML tags (not closing tags)
     # Matches: <tag>, <tag attr="val">, <tag/>, <tag />
-    # Does NOT match: </tag>
+    # Does NOT match: </tag>, autolinks like <https://...> or <mailto:...>
     HTML_TAG_PATTERN = re.compile(
-        r"<\s*([a-zA-Z][a-zA-Z0-9]*)\s*[^>]*?>",
+        r"<\s*([a-zA-Z][a-zA-Z0-9]*)(?=[\s/>])\s*[^>]*?>",
         re.IGNORECASE,
     )
 

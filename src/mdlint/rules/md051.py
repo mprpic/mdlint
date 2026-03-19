@@ -326,8 +326,10 @@ Another [bad link](#missing-section) here.
             category = unicodedata.category(char)
             if category.startswith(("L", "M", "N")) or category == "Pc":
                 result.append(char)
-            elif char in "- ":
+            elif char == "-":
                 result.append(char)
+            elif char == " " or category == "Zs":
+                result.append(" ")
             # Other characters are removed
 
         text = "".join(result)
