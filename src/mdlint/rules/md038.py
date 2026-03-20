@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 
 from mdlint.document import Document
@@ -55,47 +54,61 @@ This has `trailing space ` in code.
 This has `  spaces on both sides  ` in code.
 """
 
-    # Pattern to find code spans: backticks followed by content and closing backticks
-    # Captures: (opening backticks)(content)(closing backticks)
-    CODE_SPAN_PATTERN = re.compile(r"(`+)(.+?)\1")
-
     def check(self, document: Document, config: MD038Config) -> list[Violation]:
         """Check for spaces inside code span elements."""
         violations: list[Violation] = []
 
-        # Build set of line numbers inside code blocks
-        code_block_lines = document.code_block_lines
-
-        for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines in code blocks
-            if line_num in code_block_lines:
+        for token in document.tokens:
+            if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            # Find all code spans on this line
-            for match in self.CODE_SPAN_PATTERN.finditer(line):
-                opening_backticks = match.group(1)
-                content = match.group(2)
-                span_start = match.start()
+            start_line_1 = token.map[0] + 1
+            end_line_1 = token.map[1]
+            source_lines = [
+                document.get_line(ln) or "" for ln in range(start_line_1, end_line_1 + 1)
+            ]
+            source = "\n".join(source_lines)
+
+            search_pos = 0
+            for child in token.children:
+                if child.type != "code_inline":
+                    continue
+
+                markup = child.markup
+                mlen = len(markup)
+
+                open_idx = _find_backtick_string(source, markup, search_pos)
+                if open_idx is None:
+                    continue
+
+                content_start = open_idx + mlen
+                close_idx = _find_backtick_string(source, markup, content_start)
+                if close_idx is None:
+                    continue
+
+                raw_content = source[content_start:close_idx]
+                search_pos = close_idx + mlen
 
                 # Skip if content is only whitespace (valid per CommonMark spec)
-                if content.strip() == "":
+                if not raw_content.strip():
                     continue
 
                 # Per CommonMark spec §6.1: if content both begins AND ends with
                 # a space character, one space is stripped from each side by the
                 # parser. Emulate this to check the effective rendered content.
-                if content.startswith(" ") and content.endswith(" "):
-                    effective = content[1:-1]
+                if raw_content.startswith(" ") and raw_content.endswith(" "):
+                    effective = raw_content[1:-1]
                     padding_offset = 1
                 else:
-                    effective = content
+                    effective = raw_content
                     padding_offset = 0
 
-                has_leading_space = effective.startswith((" ", "\t"))
-                has_trailing_space = effective.endswith((" ", "\t"))
+                has_leading = effective.startswith((" ", "\t"))
+                has_trailing = effective.endswith((" ", "\t"))
 
-                if has_leading_space:
-                    column = span_start + len(opening_backticks) + padding_offset + 1
+                if has_leading:
+                    char_offset = content_start + padding_offset
+                    line_num, column = _offset_to_position(source_lines, char_offset, start_line_1)
                     violations.append(
                         Violation(
                             line=line_num,
@@ -107,10 +120,10 @@ This has `  spaces on both sides  ` in code.
                         )
                     )
 
-                if has_trailing_space:
+                if has_trailing:
                     trailing_spaces = len(effective) - len(effective.rstrip())
-                    effective_start = span_start + len(opening_backticks) + padding_offset
-                    column = effective_start + len(effective) - trailing_spaces + 1
+                    char_offset = content_start + padding_offset + len(effective) - trailing_spaces
+                    line_num, column = _offset_to_position(source_lines, char_offset, start_line_1)
                     violations.append(
                         Violation(
                             line=line_num,
@@ -126,52 +139,111 @@ This has `  spaces on both sides  ` in code.
 
     def fix(self, document: Document, config: MD038Config) -> str | None:
         """Fix spaces inside code span elements by stripping unnecessary whitespace."""
-        code_block_lines = document.code_block_lines
-        changed = False
         lines = document.content.split("\n")
+        changed = False
 
-        for line_idx, line in enumerate(lines):
-            line_num = line_idx + 1
-            if line_num in code_block_lines:
+        for token in document.tokens:
+            if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            new_line = self.CODE_SPAN_PATTERN.sub(lambda m: self._fix_code_span(m), line)
-            if new_line != line:
-                lines[line_idx] = new_line
+            start_line_0 = token.map[0]
+            end_line_0 = token.map[1] - 1
+            source_lines = lines[start_line_0 : end_line_0 + 1]
+            source = "\n".join(source_lines)
+
+            new_source = source
+            offset_adj = 0
+
+            search_pos = 0
+            for child in token.children:
+                if child.type != "code_inline":
+                    continue
+
+                markup = child.markup
+                mlen = len(markup)
+
+                open_idx = _find_backtick_string(source, markup, search_pos)
+                if open_idx is None:
+                    continue
+
+                content_start = open_idx + mlen
+                close_idx = _find_backtick_string(source, markup, content_start)
+                if close_idx is None:
+                    continue
+
+                raw_content = source[content_start:close_idx]
+                search_pos = close_idx + mlen
+
+                if not raw_content.strip():
+                    continue
+
+                if raw_content.startswith(" ") and raw_content.endswith(" "):
+                    effective = raw_content[1:-1]
+                    had_padding = True
+                else:
+                    effective = raw_content
+                    had_padding = False
+
+                has_leading = effective.startswith((" ", "\t"))
+                has_trailing = effective.endswith((" ", "\t"))
+
+                if not has_leading and not has_trailing:
+                    continue
+
+                stripped = effective.strip()
+                if had_padding:
+                    new_span = f"{markup} {stripped} {markup}"
+                else:
+                    new_span = f"{markup}{stripped}{markup}"
+
+                old_span_len = close_idx + mlen - open_idx
+                adj_start = open_idx + offset_adj
+                adj_end = adj_start + old_span_len
+                new_source = new_source[:adj_start] + new_span + new_source[adj_end:]
+                offset_adj += len(new_span) - old_span_len
                 changed = True
+
+            if new_source != source:
+                new_lines = new_source.split("\n")
+                lines[start_line_0 : end_line_0 + 1] = new_lines
 
         if not changed:
             return None
         return "\n".join(lines)
 
-    @staticmethod
-    def _fix_code_span(match: re.Match) -> str:
-        """Fix a single code span match by removing unnecessary spaces."""
-        backticks = match.group(1)
-        content = match.group(2)
 
-        # Skip if content is only whitespace (valid per CommonMark spec)
-        if content.strip() == "":
-            return match.group(0)
+def _find_backtick_string(source: str, markup: str, start: int) -> int | None:
+    """Find the next occurrence of a backtick string that is not part of a longer run.
 
-        # Determine the effective content the same way the check does
-        if content.startswith(" ") and content.endswith(" "):
-            effective = content[1:-1]
-            had_padding = True
-        else:
-            effective = content
-            had_padding = False
+    Per CommonMark spec, a backtick string is a string of one or more backtick
+    characters that is neither preceded nor followed by a backtick character.
+    """
+    mlen = len(markup)
+    pos = start
+    while pos <= len(source) - mlen:
+        idx = source.find(markup, pos)
+        if idx < 0:
+            return None
+        # Must not be preceded by a backtick
+        if idx > 0 and source[idx - 1] == "`":
+            pos = idx + 1
+            continue
+        # Must not be followed by a backtick
+        end = idx + mlen
+        if end < len(source) and source[end] == "`":
+            pos = idx + 1
+            continue
+        return idx
+    return None
 
-        has_leading = effective.startswith((" ", "\t"))
-        has_trailing = effective.endswith((" ", "\t"))
 
-        # No violation — return unchanged
-        if not has_leading and not has_trailing:
-            return match.group(0)
-
-        stripped = effective.strip()
-
-        # Re-add symmetric padding if it was present originally
-        if had_padding:
-            return f"{backticks} {stripped} {backticks}"
-        return f"{backticks}{stripped}{backticks}"
+def _offset_to_position(source_lines: list[str], offset: int, start_line_1: int) -> tuple[int, int]:
+    """Convert a character offset in joined source to (line_number, column)."""
+    current_offset = 0
+    for i, line in enumerate(source_lines):
+        line_end = current_offset + len(line)
+        if offset <= line_end:
+            column = offset - current_offset + 1
+            return start_line_1 + i, column
+        current_offset = line_end + 1  # +1 for newline
+    return start_line_1 + len(source_lines) - 1, 1

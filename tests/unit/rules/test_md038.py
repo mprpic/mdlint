@@ -289,3 +289,14 @@ class TestMD038:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result == "Text with `code` here."
+
+    def test_multiline_and_nested_no_false_positives(
+        self, rule: MD038, config: MD038Config
+    ) -> None:
+        """Multi-line and nested backtick code spans produce no false positives."""
+        content = load_fixture("md038", "multiline_and_nested.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
