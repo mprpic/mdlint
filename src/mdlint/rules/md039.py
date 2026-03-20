@@ -95,6 +95,14 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                             raw_parts.append("\n")
                         elif child.type == "html_inline":
                             raw_parts.append(child.content)
+                        elif child.type == "image":
+                            alt = child.content or ""
+                            src = child.attrGet("src") or ""
+                            title = child.attrGet("title")
+                            if title:
+                                raw_parts.append(f'![{alt}]({src} "{title}")')
+                            else:
+                                raw_parts.append(f"![{alt}]({src})")
                         i += 1
 
                     raw_text = "".join(raw_parts)
@@ -104,12 +112,12 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                     while idx > 0 and source[idx - 1] == "!":
                         idx = source.find(target, idx + 1)
 
-                    if idx >= 0:
-                        line_num, column = self._source_idx_to_position(idx, source_lines)
-                        search_offset = idx + len(target)
-                    else:
-                        line_num = token.map[0] + 1
-                        column = 1
+                    if idx < 0:
+                        i += 1
+                        continue
+
+                    line_num, column = self._source_idx_to_position(idx, source_lines)
+                    search_offset = idx + len(target)
 
                     if raw_text:
                         has_leading = raw_text != raw_text.lstrip(" ")

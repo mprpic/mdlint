@@ -248,6 +248,19 @@ class TestMD039:
         assert "leading" in violations[0].message.lower()
         assert "trailing" in violations[1].message.lower()
 
+    def test_image_badges_in_link(self, rule: MD039, config: MD039Config) -> None:
+        """Links containing image badges do not trigger false positives."""
+        content = load_fixture("md039", "image_badges.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        # Only the last link has actual leading/trailing spaces around the badge
+        assert len(violations) == 2
+        assert "leading" in violations[0].message.lower()
+        assert "trailing" in violations[1].message.lower()
+        assert violations[0].line == 7
+
     def test_fix_reference_links(self, rule: MD039, config: MD039Config) -> None:
         """Fix handles reference style links."""
         content = "[ link text ][ref]\n\n[ref]: https://example.com"
