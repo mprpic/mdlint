@@ -151,6 +151,9 @@ Document-level cached properties (`code_block_lines`, `code_span_positions`, etc
 4. Import and add the rule to `RULE_REGISTRY` in `rules/__init__.py`
 5. Add tests in `tests/unit/rules/test_mdXXX.py`
 6. Add fixtures: at least one `valid.md` and one `invalid.md` file that shows good and bad examples
+   - Keep `valid.md` and `invalid.md` minimal — they should cover the common/basic cases only
+   - For edge cases, regressions, or special scenarios, create separate fixture files (e.g., `multiline_and_nested.md`)
+   - Always use fixtures loaded via `load_fixture()` in tests; avoid inline content strings for anything beyond trivial one-line cases
 7. Add a stub file `docs/rules/mdXXX.md` and a nav entry in `mkdocs.yml` for the new rule
 8. Run all checks: `uvx tox -e py313,lint,check-format`
 
