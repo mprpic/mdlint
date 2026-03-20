@@ -389,6 +389,15 @@ Bad link: [test](#missing)
 
         assert len(violations) == 0
 
+    def test_markdown_comment_syntax(self, rule: MD051, config: MD051Config) -> None:
+        """Markdown comment syntax [//]: # (text) should not be flagged."""
+        content = load_fixture("md051", "comment_syntax.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_html_anchor_in_code_block(self, rule: MD051, config: MD051Config) -> None:
         """HTML anchors inside code blocks are not valid targets."""
         content = """\

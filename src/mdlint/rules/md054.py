@@ -136,7 +136,7 @@ Reference links [like this][ref] are also used.
                 continue
 
             # Skip reference definition lines
-            if self.REFERENCE_DEF_PATTERN.match(line):
+            if Document.REFERENCE_DEF_PATTERN.match(line):
                 continue
 
             # Track processed ranges to avoid duplicate reports

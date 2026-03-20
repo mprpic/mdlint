@@ -170,7 +170,7 @@ Read [more](https://example.com/article).
                     continue
 
                 # Skip if this is a reference definition line
-                if self.REFERENCE_DEF_PATTERN.match(line):
+                if Document.REFERENCE_DEF_PATTERN.match(line):
                     continue
 
                 link_text = match.group(1)

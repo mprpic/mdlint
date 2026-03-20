@@ -196,7 +196,7 @@ Another paragraph with a line that is also way too long and should be flagged by
         ref_lines: set[int] = set()
 
         for line_num, line in enumerate(document.lines, start=1):
-            if Rule.REFERENCE_DEF_PATTERN.match(line):
+            if Document.REFERENCE_DEF_PATTERN.match(line):
                 ref_lines.add(line_num)
 
         return ref_lines

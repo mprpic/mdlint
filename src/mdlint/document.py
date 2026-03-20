@@ -108,14 +108,19 @@ class Document:
                         search_start = idx + len(full_span)
         return code_columns
 
-    _REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[([^\]]+)\]:\s*(.*)$")
+    # Pattern to match reference definitions: [ref]: destination [optional title]
+    REFERENCE_DEF_PATTERN = re.compile(
+        r"^\s*\[([^\]]+)\]:\s*"
+        r"([^\s\"'(]+|<[^>]*>)"  # destination (bare or angle-bracketed)
+        r"(?:\s+[\"'(].*)?\s*$"  # optional title
+    )
 
     @cached_property
     def reference_definitions(self) -> dict[str, str]:
         """Reference definitions mapping lowercase IDs to destinations."""
         definitions: dict[str, str] = {}
         for line in self.lines:
-            match = self._REFERENCE_DEF_PATTERN.match(line)
+            match = self.REFERENCE_DEF_PATTERN.match(line)
             if match:
                 ref_id = match.group(1).lower()
                 destination = match.group(2).strip()

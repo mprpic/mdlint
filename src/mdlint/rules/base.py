@@ -1,4 +1,3 @@
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -32,9 +31,6 @@ class Rule(ABC, Generic[ConfigT]):
     # Examples for documentation (should match tests/fixtures/<id>/valid.md and invalid.md)
     example_valid: str | None = None
     example_invalid: str | None = None
-
-    # Pattern to match reference definitions: [ref]: destination
-    REFERENCE_DEF_PATTERN = re.compile(r"^\s*\[([^\]]+)\]:\s*(.*)$")
 
     @property
     def fixable(self) -> bool:

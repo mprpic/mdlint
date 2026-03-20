@@ -130,7 +130,7 @@ Another [bad link](#missing-section) here.
                 if result is not None:
                     yield line_num, column, match, destination, result
 
-            ref_match = self.REFERENCE_DEF_PATTERN.match(line)
+            ref_match = Document.REFERENCE_DEF_PATTERN.match(line)
             if ref_match:
                 destination = ref_match.group(2).strip()
                 dest_start = line.find(destination)

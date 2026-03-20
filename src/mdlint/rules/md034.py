@@ -95,7 +95,7 @@ Contact us at user@example.com for support.
             if not has_url and not has_email:
                 continue
 
-            if self.REFERENCE_DEF_PATTERN.match(line):
+            if Document.REFERENCE_DEF_PATTERN.match(line):
                 continue
 
             html_ranges = (

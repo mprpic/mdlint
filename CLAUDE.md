@@ -97,6 +97,7 @@ Uses `markdown-it-py` for token-based parsing. The `Document` class provides:
 - `code_span_positions`: (cached) `dict[int, set[int]]` mapping line numbers to 1-indexed column positions inside
   inline code spans
 - `reference_definitions`: (cached) `dict[str, str]` mapping lowercase reference IDs to destinations
+- `REFERENCE_DEF_PATTERN`: compiled regex for matching reference definition lines
 
 ### Configuration
 
@@ -138,10 +139,10 @@ both files and directories, respecting `.gitignore` patterns by default.
 The `Rule` base class in `rules/base.py` provides:
 
 - `_overlaps_ranges(start, end, ranges)` — checks if a 0-indexed position range overlaps with any existing ranges
-- `REFERENCE_DEF_PATTERN` — compiled regex for matching reference definition lines
 
-Document-level cached properties (`code_block_lines`, `code_span_positions`, etc.) are accessed directly on the
-`document` object — see Document Parsing above.
+Document-level cached properties (`code_block_lines`, `code_span_positions`, etc.) and `REFERENCE_DEF_PATTERN` (compiled
+regex for matching reference definition lines) are accessed directly on the `Document` class — see Document Parsing
+above.
 
 ## Adding a New Rule
 
