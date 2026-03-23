@@ -223,6 +223,22 @@ class TestMD011:
         result = rule.fix(doc, config)
         assert result is None
 
+    def test_html_blocks_ignored(self, rule: MD011, config: MD011Config) -> None:
+        """Reversed link patterns inside HTML blocks are ignored."""
+        content = load_fixture("md011", "html_blocks.md")
+        doc = Document(Path("html_blocks.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_fix_preserves_html_blocks(self, rule: MD011, config: MD011Config) -> None:
+        """Fix does not modify reversed link patterns inside HTML blocks."""
+        content = load_fixture("md011", "html_blocks.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
+
     def test_fix_empty_document(self, rule: MD011, config: MD011Config) -> None:
         """Fix returns None for empty document."""
         doc = Document(Path("test.md"), "")

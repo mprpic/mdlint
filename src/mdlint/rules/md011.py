@@ -68,10 +68,11 @@ Here is (another bad link)[https://example.org/page] in a sentence.
         Yields tuples of (line_num, match, pre_char, link_text, link_dest, column).
         """
         code_block_lines = document.code_block_lines
+        html_block_lines = document.html_block_lines
         inline_code_columns = document.code_span_positions
 
         for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
+            if line_num in code_block_lines or line_num in html_block_lines:
                 continue
 
             if ")[" not in line:
