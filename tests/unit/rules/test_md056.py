@@ -113,6 +113,15 @@ class TestMD056:
 
         assert len(violations) == 0
 
+    def test_non_table_line_in_token_map(self, rule: MD056, config: MD056Config) -> None:
+        """Non-table line included in table token map should not be flagged."""
+        content = load_fixture("md056", "non_table_trailing.md")
+        doc = Document(Path("non_table_trailing.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_header_only_table(self, rule: MD056, config: MD056Config) -> None:
         """Table with only header and delimiter rows."""
         content = load_fixture("md056", "header_only.md")

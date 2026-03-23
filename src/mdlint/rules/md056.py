@@ -91,6 +91,9 @@ class MD056(Rule[MD056Config]):
                     if self._is_delimiter_row(line):
                         continue
 
+                    if not self._UNESCAPED_PIPE.search(line):
+                        continue
+
                     actual_count = self._count_cells(line, self._UNESCAPED_PIPE)
 
                     if expected_count is None:
