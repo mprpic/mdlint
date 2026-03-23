@@ -50,9 +50,23 @@ class MD018(Rule[MD018Config]):
     # Pattern to match lines starting with hash(es) followed by non-space, non-hash char
     ATX_MISSING_SPACE_PATTERN = re.compile(r"^(#+)[^#\s]")
 
+    @staticmethod
+    def _continuation_lines(document: Document) -> set[int]:
+        """Return 1-indexed line numbers that are continuations of multi-line inline content."""
+        continuation: set[int] = set()
+        for token in document.tokens:
+            if token.type == "inline" and token.map and token.map[1] - token.map[0] > 1:
+                for line_num in range(token.map[0] + 2, token.map[1] + 1):
+                    continuation.add(line_num)
+        return continuation
+
     def _find_missing_space_lines(self, document: Document) -> list[tuple[int, re.Match[str]]]:
         """Return list of (line_num, match) for lines missing space after hash."""
-        ignored_lines = document.code_block_lines | document.html_block_lines
+        ignored_lines = (
+            document.code_block_lines
+            | document.html_block_lines
+            | self._continuation_lines(document)
+        )
 
         results: list[tuple[int, re.Match[str]]] = []
         for line_num, line in enumerate(document.lines, start=1):

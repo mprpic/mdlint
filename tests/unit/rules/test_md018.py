@@ -138,3 +138,19 @@ class TestMD018:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_multiline_inline_not_flagged(self, rule: MD018, config: MD018Config) -> None:
+        """Continuation of multi-line inline content should not be flagged."""
+        content = load_fixture("md018", "multiline_inline.md")
+        doc = Document(Path("multiline_inline.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_fix_ignores_multiline_inline(self, rule: MD018, config: MD018Config) -> None:
+        """Fix does not modify continuation lines of multi-line inline content."""
+        content = load_fixture("md018", "multiline_inline.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result is None
