@@ -184,7 +184,7 @@ class MD060(Rule[MD060Config]):
         if style_tight_allowed:
             candidates.append(errors_tight)
 
-        return min(candidates, key=len) if candidates else []  # type: ignore[return-value]
+        return min(candidates, key=len) if candidates else []
 
     def _check_aligned_style(
         self,

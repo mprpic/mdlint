@@ -261,13 +261,13 @@ class Linter:
                 if not rule.fixable:
                     continue
 
-                violations = rule.check(document, config)
-                cached_violations[rule.id] = violations
-                if not violations:
+                rule_violations = rule.check(document, config)
+                cached_violations[rule.id] = rule_violations
+                if not rule_violations:
                     continue
 
                 # Skip fix if all violations for this rule are suppressed
-                non_suppressed = filter_suppressed(document, violations)
+                non_suppressed = filter_suppressed(document, rule_violations)
                 if not non_suppressed:
                     continue
 

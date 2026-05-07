@@ -47,7 +47,7 @@ test = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.8.0",
-    "ty>=0.0.1a11",
+    "mypy>=1.0.0",
     "tox>=4.0.0",
 ]
 docs = [
@@ -57,3 +57,7 @@ dev = [
     { include-group = "test" },
     { include-group = "docs" }
 ]
+
+[tool.mypy]
+allow_redefinition = true
+warn_unused_ignores = true
