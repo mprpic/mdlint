@@ -13,19 +13,19 @@ hide:
     Install as a [uv tool](https://docs.astral.sh/uv/guides/tools/):
 
     ```bash
-    uv tool install --from git+https://github.com/mprpic/mdlint mdlint
+    uv tool install mdlint
     ```
 
     Or run directly in a temporary environment without installing:
 
     ```bash
-    uvx --from git+https://github.com/mprpic/mdlint mdlint check README.md
+    uvx mdlint check README.md
     ```
 
 === "pip"
 
-    Install directly from GitHub:
+    Install from PyPI:
 
     ```bash
-    pip install --user git+https://github.com/mprpic/mdlint
+    pip install --user mdlint
     ```

@@ -26,7 +26,7 @@ Markdown in your code base or documentation project.
 Install mdlint:
 
 ```bash
-uv tool install --from git+https://github.com/mprpic/mdlint mdlint
+uv tool install mdlint
 ```
 
 Lint a file:

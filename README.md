@@ -16,11 +16,11 @@ A Python Markdown linter that checks files for style and formatting violations.
 ## Installation
 
 ```bash
-uv tool install --from git+https://github.com/mprpic/mdlint mdlint
+uv tool install mdlint
 # OR
-pip install --user git+https://github.com/mprpic/mdlint
+pip install --user mdlint
 # OR run directly
-uvx --from git+https://github.com/mprpic/mdlint mdlint -h
+uvx mdlint -h
 ```
 
 Requires Python 3.10 or later.
