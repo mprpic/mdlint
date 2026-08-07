@@ -436,6 +436,50 @@ class TestMD029Fix:
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
 
+    def test_fix_preserves_space_padding(self, rule: MD029) -> None:
+        """Fix keeps right-aligned prefixes aligned."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "space_padded.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith(" 1. Item\n 2. Item\n 3. Item\n 4. Item\n")
+
+    def test_fix_preserves_zero_padding(self, rule: MD029) -> None:
+        """Fix keeps zero-padded prefixes zero-padded."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "zero_padded.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith("01. Item\n02. Item\n03. Item\n04. Item\n")
+
+    def test_fix_does_not_pad_unaligned_list(self, rule: MD029) -> None:
+        """Fix adds no padding when the list was never aligned."""
+        config = MD029Config(style="ordered")
+        content = load_fixture("md029", "unpadded_mixed_widths.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith("1. Item\n2. Item\n3. Item\n4. Item\n")
+
+    def test_fix_pads_aligned_list_for_one_style(self, rule: MD029) -> None:
+        """Fix keeps alignment when collapsing an aligned list to all 1s."""
+        config = MD029Config(style="one")
+        content = load_fixture("md029", "space_padded.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith(" 1. Item\n 1. Item\n 1. Item\n 1. Item\n")
+
     def test_fixable_property(self, rule: MD029) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True
