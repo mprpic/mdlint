@@ -196,14 +196,24 @@ class TestMD022:
 
         assert len(violations) == 0
 
-    def test_front_matter_requires_blank_line(self, rule: MD022, config: MD022Config) -> None:
-        """Heading after front matter requires blank line above."""
-        content = "---\ntitle: test\n---\n# Heading\n\nSome text.\n"
-        doc = Document(Path("test.md"), content)
+    def test_front_matter_ignored_by_default(self, rule: MD022, config: MD022Config) -> None:
+        """Heading directly after front matter is not flagged by default."""
+        content = load_fixture("md022", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
 
         violations = rule.check(doc, config)
 
+        assert violations == []
+
+    def test_front_matter_included_when_configured(self, rule: MD022) -> None:
+        """Heading directly after front matter is flagged with include_front_matter."""
+        content = load_fixture("md022", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+
+        violations = rule.check(doc, MD022Config(include_front_matter=True))
+
         assert len(violations) == 1
+        assert violations[0].line == 4
         assert "above" in violations[0].message.lower()
 
     def test_front_matter_with_blank_line(self, rule: MD022, config: MD022Config) -> None:
@@ -397,12 +407,18 @@ class TestMD022Fix:
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
 
-    def test_fix_front_matter_needs_blank(self, rule: MD022, config: MD022Config) -> None:
-        """Fixes heading after front matter that needs a blank line."""
-        content = "---\ntitle: test\n---\n# Heading\n\nSome text.\n"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "---\ntitle: test\n---\n\n# Heading\n\nSome text.\n"
+    def test_fix_front_matter_left_alone_by_default(self, rule: MD022, config: MD022Config) -> None:
+        """Heading after front matter is not touched by default."""
+        content = load_fixture("md022", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_front_matter_needs_blank(self, rule: MD022) -> None:
+        """Fixes heading after front matter when include_front_matter is set."""
+        content = load_fixture("md022", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+        result = rule.fix(doc, MD022Config(include_front_matter=True))
+        assert result == "---\ntitle: Title\n---\n\n## Heading\n\nSome text here.\n"
 
     def test_fix_empty_document(self, rule: MD022, config: MD022Config) -> None:
         """Empty document returns None."""

@@ -21,6 +21,12 @@ class MD022Config(RuleConfig):
             "description": "Number of blank lines required after headings. Use -1 to disable.",
         },
     )
+    include_front_matter: bool = field(
+        default=False,
+        metadata={
+            "description": "Require blank lines between front matter and a following heading.",
+        },
+    )
 
 
 class MD022(Rule[MD022Config]):
@@ -39,7 +45,11 @@ class MD022(Rule[MD022Config]):
         "does not require blank lines above, and the last heading at the "
         "end of a document does not require blank lines below. Set "
         "`lines_above` or `lines_below` to `-1` to disable the "
-        "respective check."
+        "respective check.\n\n"
+        "Front matter is ignored by default, so a heading on the line "
+        "immediately after the closing front matter delimiter is not "
+        "flagged. Set `include_front_matter` to `true` to require the "
+        "configured number of blank lines there as well."
     )
 
     rationale = (
@@ -73,6 +83,7 @@ Some more text.
 
         lines_above = config.lines_above
         lines_below = config.lines_below
+        skipped_above = self._skipped_lines_above(document, config)
 
         for token in document.tokens:
             if token.type == "heading_open" and token.map:
@@ -81,7 +92,9 @@ Some more text.
 
                 # Check blank lines above
                 if lines_above > 0 and heading_start_line > 1:
-                    blank_count = self._count_blank_lines_above(document, heading_start_line)
+                    blank_count = self._count_blank_lines_above(
+                        document, heading_start_line, skipped_above
+                    )
                     if blank_count < lines_above:
                         violations.append(
                             Violation(
@@ -136,6 +149,7 @@ Some more text.
 
         lines = document.content.split("\n")
         num_doc_lines = len(document.lines)
+        skipped_above = self._skipped_lines_above(document, config)
         changed = False
 
         # Process headings from bottom to top so insertions don't shift indices
@@ -160,7 +174,7 @@ Some more text.
             if lines_above > 0 and heading_start > 0:
                 existing_above = 0
                 idx = heading_start - 1
-                while idx >= 0 and lines[idx].strip() == "":
+                while idx >= 0 and (idx < skipped_above or lines[idx].strip() == ""):
                     existing_above += 1
                     idx -= 1
                 if existing_above < lines_above:
@@ -175,12 +189,37 @@ Some more text.
         return "\n".join(lines)
 
     @staticmethod
-    def _count_blank_lines_above(document: Document, heading_line: int) -> int:
+    def _skipped_lines_above(document: Document, config: MD022Config) -> int:
+        """Get the number of leading lines that count as blank space above a heading.
+
+        Front matter sits outside the document body, so unless
+        `include_front_matter` is set it must not make a heading below it look
+        crowded.
+
+        Args:
+            document: The document being checked.
+            config: Rule configuration.
+
+        Returns:
+            1-indexed last line of the front matter, or 0 if there is none to skip.
+        """
+        if config.include_front_matter:
+            return 0
+        for token in document.tokens:
+            if token.type == "front_matter" and token.map:
+                return token.map[1]
+        return 0
+
+    @staticmethod
+    def _count_blank_lines_above(
+        document: Document, heading_line: int, skipped_above: int = 0
+    ) -> int:
         """Count consecutive blank lines immediately above a heading.
 
         Args:
             document: The document being checked.
             heading_line: 1-indexed line number of the heading.
+            skipped_above: Number of leading lines to treat as blank.
 
         Returns:
             Number of consecutive blank lines above the heading.
@@ -190,7 +229,9 @@ Some more text.
 
         while line_num >= 1:
             line_content = document.get_line(line_num)
-            if line_content is not None and line_content.strip() == "":
+            if line_num <= skipped_above or (
+                line_content is not None and line_content.strip() == ""
+            ):
                 count += 1
                 line_num -= 1
             else:
