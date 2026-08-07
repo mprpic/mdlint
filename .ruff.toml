@@ -1,5 +1,10 @@
 line-length = 100
 
+# Fixtures deliberately contain trailing whitespace, tabs, and consecutive
+# blank lines that ruff would normalize when formatting Python code
+# blocks in Markdown (introduced in ruff 0.16.0).
+extend-exclude = ["tests/fixtures"]
+
 [lint]
 # https://docs.astral.sh/ruff/rules/
 select = ["F", "E", "W", "I", "N"]

@@ -122,7 +122,8 @@ both files and directories, respecting `.gitignore` patterns by default.
 ## Code Style
 
 - Python 3.10+ with type hints
-- Ruff for linting and formatting (see pyproject.toml for configuration)
+- Ruff for linting and formatting (see `.ruff.toml` for configuration); `tests/fixtures/` is excluded because the
+  fixtures deliberately contain malformed whitespace that ruff would normalize
 - Dataclasses for configuration and data models
 - Abstract base classes for extensibility (Rule)
 - Always use file-level (top-of-file) imports; only use function-level imports if absolutely necessary (e.g., to avoid
@@ -154,7 +155,8 @@ above.
 6. Add fixtures: at least one `valid.md` and one `invalid.md` file that shows good and bad examples
    - Keep `valid.md` and `invalid.md` minimal — they should cover the common/basic cases only
    - For edge cases, regressions, or special scenarios, create separate fixture files (e.g., `multiline_and_nested.md`)
-   - Always use fixtures loaded via `load_fixture()` in tests; avoid inline content strings for anything beyond trivial one-line cases
+   - Always use fixtures loaded via `load_fixture()` in tests; avoid inline content strings for anything beyond
+     trivial one-line cases
 7. Add a stub file `docs/rules/mdXXX.md` and a nav entry in `mkdocs.yml` for the new rule
 8. Run all checks: `uvx tox -e py313,lint,check-format`
 
