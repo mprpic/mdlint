@@ -1,5 +1,12 @@
 # mdlint
 
+[![PyPI version](https://img.shields.io/pypi/v/mdlint)](https://pypi.org/project/mdlint/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mdlint)](https://pypi.org/project/mdlint/)
+[![CI](https://github.com/mprpic/mdlint/actions/workflows/ci.yml/badge.svg)](https://github.com/mprpic/mdlint/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/mprpic/mdlint)](https://github.com/mprpic/mdlint/blob/main/LICENSE)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/mdlint)](https://pypi.org/project/mdlint/)
+[![Docs](https://img.shields.io/badge/docs-mdlint.dev-blue)](https://mdlint.dev/)
+
 A Python Markdown linter that checks files for style and formatting violations.
 
 - **50+ built-in rules** covering headings, lists, whitespace, links, code blocks, and more
