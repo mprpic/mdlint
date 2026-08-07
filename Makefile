@@ -1,4 +1,4 @@
-.PHONY: docs bump-minor bump-major build publish publish-test
+.PHONY: docs bump-minor bump-major
 
 docs:
 	uv run --with 'mkdocs-material[imaging]' mkdocs serve --livereload
@@ -17,13 +17,3 @@ bump-minor:
 bump-major:
 	uv version --bump major
 	$(commit-tag-push)
-
-build:
-	rm -rf dist/
-	uv build
-
-publish:
-	uv publish
-
-publish-test:
-	uv publish --publish-url https://test.pypi.org/legacy/
