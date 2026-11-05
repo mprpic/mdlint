@@ -100,20 +100,23 @@ def print_results(
 
     # Summary line
     checked = _pluralize(result.files_checked, "file")
-    if result.files_fixed > 0:
-        fixed = _pluralize(result.files_fixed, "file")
-        if result.total_violations > 0 or result.files_with_errors > 0:
-            violations = _pluralize(result.total_violations, "violation")
-            files = _pluralize(result.files_with_violations, "file")
-            console.print(
-                f"[green]✓[/green] Fixed {fixed}. "
-                f"{violations} remaining in {files} ({checked} checked)"
-            )
-        else:
-            console.print(f"[green]✓[/green] Fixed {fixed}. All files valid ({checked} checked)")
-    elif result.total_violations > 0 or result.files_with_errors > 0:
+    # Files that could not be read have no violations, so they need their own mention or
+    # a run that failed on every file reads as "0 violations in 0 files".
+    problems: list[str] = []
+    if result.total_violations > 0:
         violations = _pluralize(result.total_violations, "violation")
         files = _pluralize(result.files_with_violations, "file")
-        console.print(f"[red]✘[/red] Found {violations} in {files} ({checked} checked)")
+        remaining = " remaining" if result.files_fixed > 0 else ""
+        problems.append(f"{violations}{remaining} in {files}")
+    if result.files_with_errors > 0:
+        problems.append(f"errors in {_pluralize(result.files_with_errors, 'file')}")
+    summary = " and ".join(problems)
+
+    if result.files_fixed > 0:
+        fixed = _pluralize(result.files_fixed, "file")
+        status = summary[0].upper() + summary[1:] if summary else "All files valid"
+        console.print(f"[green]✓[/green] Fixed {fixed}. {status} ({checked} checked)")
+    elif summary:
+        console.print(f"[red]✘[/red] Found {summary} ({checked} checked)")
     else:
         console.print(f"[green]✓[/green] All files valid ({checked} checked)")

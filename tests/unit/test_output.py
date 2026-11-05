@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from mdlint.linter import FileResult, LintResult
@@ -189,3 +190,43 @@ class TestTerminalContext:
         assert "1: # Heading" in output
         assert "2: Bad line" in output
         assert "^" in output
+
+
+class TestTerminalSummary:
+    """The summary line accounts for every file, including ones that could not be read."""
+
+    VIOLATION = Violation(line=1, column=1, rule_id="MD001", rule_name="test", message="Test")
+
+    def _file(self, kind: str) -> FileResult:
+        if kind == "error":
+            return FileResult(path=Path("bad.md"), error="'utf-8' codec can't decode byte")
+        if kind == "violation":
+            return FileResult(path=Path("v.md"), violations=[self.VIOLATION], content="# H\n")
+        result = FileResult(path=Path("ok.md"), content="# H\n")
+        result.was_fixed = kind == "fixed"
+        return result
+
+    @pytest.mark.parametrize(
+        ("kinds", "summary"),
+        [
+            (["clean"], "✓ All files valid (1 file checked)"),
+            (["violation", "clean"], "✘ Found 1 violation in 1 file (2 files checked)"),
+            (["error", "error"], "✘ Found errors in 2 files (2 files checked)"),
+            (
+                ["violation", "error"],
+                "✘ Found 1 violation in 1 file and errors in 1 file (2 files checked)",
+            ),
+            (["fixed"], "✓ Fixed 1 file. All files valid (1 file checked)"),
+            (
+                ["fixed", "violation"],
+                "✓ Fixed 1 file. 1 violation remaining in 1 file (2 files checked)",
+            ),
+            (["fixed", "error"], "✓ Fixed 1 file. Errors in 1 file (2 files checked)"),
+        ],
+    )
+    def test_summary_line(self, kinds: list[str], summary: str) -> None:
+        result = LintResult(files=[self._file(kind) for kind in kinds])
+
+        output = _capture_terminal_output(result)
+
+        assert output.splitlines()[-1] == summary
