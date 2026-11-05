@@ -110,6 +110,22 @@ class TestMD023:
 
         assert len(violations) == 0
 
+    def test_lazy_continuation_not_flagged(self, rule: MD023, config: MD023Config) -> None:
+        """Lines indented 4+ columns after a paragraph continue it and are not headings."""
+        content = load_fixture("md023", "lazy_continuation.md")
+        doc = Document(Path("lazy_continuation.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
+    def test_front_matter_and_html_not_flagged(self, rule: MD023, config: MD023Config) -> None:
+        """Indented hash lines in front matter and HTML blocks are not headings."""
+        content = load_fixture("md023", "front_matter_and_html.md")
+        doc = Document(Path("front_matter_and_html.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
     def test_fix_corrects_invalid(self, rule: MD023, config: MD023Config) -> None:
         """Fix removes leading whitespace from indented headings."""
         content = load_fixture("md023", "invalid.md")
@@ -118,6 +134,7 @@ class TestMD023:
         assert result is not None
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+        assert rule.fix(fixed_doc, config) is None
 
     def test_fix_returns_none_for_valid(self, rule: MD023, config: MD023Config) -> None:
         """Fix returns None when no headings need fixing."""

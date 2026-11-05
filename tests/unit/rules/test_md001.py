@@ -203,6 +203,30 @@ class TestMD001Fix:
         assert result is not None
         assert "## My Important Heading" in result
 
+    def test_fix_containers_and_indentation(self, rule: MD001, config: MD001Config) -> None:
+        """Fix rewrites quoted, indented and listed ATX headings without touching other lines."""
+        content = load_fixture("md001", "containers_and_indentation.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == (
+            "# Title\n\n> ## Quoted Note\n> body\n\n  ## Indented Note\nbody\n\n"
+            "- ## Listed Note\n  body\n"
+        )
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_shifts_following_headings(self, rule: MD001, config: MD001Config) -> None:
+        """Headings after an offender move with it so they keep their place in the outline."""
+        content = load_fixture("md001", "shift_following.md")
+        doc = Document(Path("test.md"), content)
+        assert [v.line for v in rule.check(doc, config)] == [3, 11, 15]
+        result = rule.fix(doc, config)
+        assert result is not None
+        levels = [line.split(" ")[0] for line in result.splitlines() if line]
+        assert levels == ["#", "##", "###", "##", "##", "###", "#", "##", "##", "###"]
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
     def test_fixable_property(self, rule: MD001) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True

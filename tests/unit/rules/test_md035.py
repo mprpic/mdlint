@@ -237,3 +237,48 @@ class TestMD035:
         assert "   ***" not in result
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    def test_containers_style_ignores_prefix(self, rule: MD035, config: MD035Config) -> None:
+        """Blockquote markers and list bullets are not part of the rule's style."""
+        content = load_fixture("md035", "containers.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [5, 7, 9]
+        assert all("found '***'" in v.message for v in violations)
+
+    def test_fix_keeps_container_prefix(self, rule: MD035, config: MD035Config) -> None:
+        """Fix keeps quote and list prefixes, and declines when a bullet would join the rule."""
+        content = load_fixture("md035", "containers.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Document\n\n---\n\n> ---\n\n+ ---\n\n- ***\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert [v.line for v in rule.check(fixed_doc, config)] == [9]
+        assert rule.fix(fixed_doc, config) is None
+
+    def test_fix_declines_setext_underline(self, rule: MD035) -> None:
+        """A dash rule right after paragraph text would become a setext heading underline."""
+        config = MD035Config(style="---")
+        content = load_fixture("md035", "after_paragraph.md")
+        doc = Document(Path("test.md"), content)
+        assert [v.line for v in rule.check(doc, config)] == [4]
+        assert rule.fix(doc, config) is None
+
+    def test_fix_after_paragraph_with_spaced_style(self, rule: MD035) -> None:
+        """A spaced dash rule cannot be a setext underline, so it is applied."""
+        config = MD035Config(style="- - -")
+        content = load_fixture("md035", "after_paragraph.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Document\n\nParagraph text\n- - -\n\n- - -\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_declines_front_matter_opener(self, rule: MD035) -> None:
+        """A dash rule on the first line would open front matter."""
+        config = MD035Config(style="---")
+        content = load_fixture("md035", "first_line.md")
+        doc = Document(Path("test.md"), content)
+        assert [v.line for v in rule.check(doc, config)] == [1]
+        assert rule.fix(doc, config) is None

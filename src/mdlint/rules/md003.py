@@ -139,31 +139,44 @@ Mixed heading styles in the same document.
         return violations
 
     def fix(self, document: Document, config: MD003Config) -> str | None:
-        """Fix heading style violations by converting headings to the expected style."""
+        """Fix heading style violations by converting headings to the expected style.
+
+        A heading directly after paragraph or table text is left as is when it would become
+        setext, because its text line would be absorbed into the block above.
+        """
         style = config.style
         expected_style: str | None = None if style == "consistent" else style
 
-        # Collect heading info: (line_0indexed, level, current_style)
-        headings: list[tuple[int, int, str]] = []
-        for token in document.tokens:
-            if token.type == "heading_open":
+        # Lines on which a new line of text would continue the paragraph or table above
+        absorbing_lines = {
+            token.map[1]
+            for token in document.tokens
+            if token.type in ("paragraph_open", "table_open") and token.map
+        }
+
+        # Collect heading info: (line_0indexed, end_line_0indexed, level, current_style, text)
+        headings: list[tuple[int, int, int, str, str]] = []
+        for i, token in enumerate(document.tokens):
+            if token.type == "heading_open" and token.map:
                 level = int(token.tag[1])
-                line_0 = token.map[0] if token.map else 0
+                line_0, end_0 = token.map
                 raw_line = document.get_line(line_0 + 1)
                 current_style = self._get_heading_style(token.markup, raw_line)
-                headings.append((line_0, level, current_style))
+                # The inline content has container markers and closing hashes removed.
+                text = " ".join(part.strip() for part in document.tokens[i + 1].content.split("\n"))
+                headings.append((line_0, end_0, level, current_style, text))
 
         if not headings:
             return None
 
         # For consistent mode, determine expected from first heading
         if expected_style is None:
-            expected_style = headings[0][2]
+            expected_style = headings[0][3]
 
         # Determine which headings need fixing
-        # (line_0idx, level, current_style, effective_expected)
-        fixes: list[tuple[int, int, str, str]] = []
-        for line_0, level, current_style in headings:
+        # (line_0idx, end_0idx, level, current_style, effective_expected, text)
+        fixes: list[tuple[int, int, int, str, str, str]] = []
+        for line_0, end_0, level, current_style, text in headings:
             if expected_style in ("setext_with_atx", "setext_with_atx_closed"):
                 atx_variant = "atx" if expected_style == "setext_with_atx" else "atx_closed"
                 effective_expected = "setext" if level <= 2 else atx_variant
@@ -171,10 +184,13 @@ Mixed heading styles in the same document.
                 effective_expected = expected_style
 
             if current_style != effective_expected:
-                # Skip impossible conversions: can't convert h3+ to setext
-                if effective_expected == "setext" and level > 2:
+                # Setext can't express h3+, an empty heading, or a heading whose text
+                # line would continue the paragraph or table above it.
+                if effective_expected == "setext" and (
+                    level > 2 or not text or line_0 in absorbing_lines
+                ):
                     continue
-                fixes.append((line_0, level, current_style, effective_expected))
+                fixes.append((line_0, end_0, level, current_style, effective_expected, text))
 
         if not fixes:
             return None
@@ -182,42 +198,18 @@ Mixed heading styles in the same document.
         lines = document.content.split("\n")
 
         # Process fixes in reverse order to preserve line indices
-        for line_0, level, current, target in reversed(fixes):
-            raw_line = lines[line_0]
+        for line_0, end_0, level, _, target, text in reversed(fixes):
+            prefix = document.container_prefix(line_0 + 1)
 
-            if current == "setext":
-                # Heading text is on this line, underline is next line
-                heading_text = raw_line
-                underline_idx = line_0 + 1
-
-                if target == "atx":
-                    lines[line_0] = "#" * level + " " + heading_text
-                    if underline_idx < len(lines):
-                        lines.pop(underline_idx)
-                elif target == "atx_closed":
-                    lines[line_0] = "#" * level + " " + heading_text + " " + "#" * level
-                    if underline_idx < len(lines):
-                        lines.pop(underline_idx)
-
-            elif current == "atx":
-                heading_text = re.sub(r"^#{1,6}\s+", "", raw_line)
-
-                if target == "setext":
-                    underline_char = "=" if level == 1 else "-"
-                    lines[line_0] = heading_text
-                    lines.insert(line_0 + 1, underline_char * len(heading_text))
-                elif target == "atx_closed":
-                    lines[line_0] = "#" * level + " " + heading_text + " " + "#" * level
-
-            elif current == "atx_closed":
-                heading_text = re.sub(r"^#{1,6}\s+", "", raw_line)
-                heading_text = re.sub(r"\s+#{1,6}\s*$", "", heading_text)
-
-                if target == "setext":
-                    underline_char = "=" if level == 1 else "-"
-                    lines[line_0] = heading_text
-                    lines.insert(line_0 + 1, underline_char * len(heading_text))
-                elif target == "atx":
-                    lines[line_0] = "#" * level + " " + heading_text
+            if target == "setext":
+                underline_char = "=" if level == 1 else "-"
+                underline = document.continuation_prefix(line_0 + 1) + underline_char * len(text)
+                lines[line_0:end_0] = [prefix + text, underline]
+            else:
+                marker = "#" * level
+                closing = marker if target == "atx_closed" else ""
+                heading = " ".join(part for part in (marker, text, closing) if part)
+                # A setext heading spans its text lines and the underline.
+                lines[line_0:end_0] = [prefix + heading]
 
         return "\n".join(lines)

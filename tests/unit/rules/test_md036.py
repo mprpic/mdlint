@@ -89,6 +89,15 @@ class TestMD036:
         assert len(violations) == 1
         assert violations[0].line == 3
 
+    def test_full_width_punctuation(self, rule: MD036, config: MD036Config) -> None:
+        """Full-width sentence punctuation marks emphasis as a sentence, not a heading."""
+        content = load_fixture("md036", "full_width.md")
+        doc = Document(Path("full_width.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [15]
+
     def test_empty_punctuation(self, rule: MD036) -> None:
         """Empty punctuation means all emphasis-only paragraphs are flagged."""
         config = MD036Config(punctuation="")

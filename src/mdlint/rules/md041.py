@@ -20,7 +20,7 @@ class MD041Config(RuleConfig):
         },
     )
     front_matter_title: str = field(
-        default=r"^\s*title\s*[:=]",
+        default=r"^title\s*[:=]",
         metadata={
             "regex": True,
             "description": (

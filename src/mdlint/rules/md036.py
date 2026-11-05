@@ -10,9 +10,12 @@ class MD036Config(RuleConfig):
     """Configuration for MD036 rule."""
 
     punctuation: str = field(
-        default=".,;:!?",
+        default=".,;:!?。，；：！？",
         metadata={
-            "description": "Characters considered as trailing punctuation.",
+            "description": (
+                "Characters considered as trailing punctuation. The default also "
+                "includes the full-width forms used in CJK text."
+            ),
         },
     )
 
@@ -28,8 +31,9 @@ class MD036(Rule[MD036Config]):
     description = (
         "This rule checks for paragraphs that consist entirely of bold or italic "
         "text, which may indicate the author is using emphasis instead of a proper "
-        "heading. Paragraphs that end with punctuation are not flagged, as they are "
-        "likely intended to be emphasized sentences rather than headings."
+        "heading. Paragraphs that end with punctuation (including full-width forms "
+        "such as `。`) are not flagged, as they are likely intended to be emphasized "
+        "sentences rather than headings."
     )
 
     rationale = (

@@ -59,13 +59,19 @@ Headings starting at the beginning of the line.
 Headings with leading spaces.
 """
 
-    # Pattern to match indented ATX-style headings (not in blockquotes)
-    INDENTED_ATX_PATTERN = re.compile(r"^[ \t]+#{1,6}(?:\s|$)")
+    # Pattern to match indented ATX-style headings (not in blockquotes). Only 1-3 spaces:
+    # a tab or a fourth space reaches column 4, which makes the line indented code or
+    # paragraph continuation text rather than a heading.
+    INDENTED_ATX_PATTERN = re.compile(r"^ {1,3}#{1,6}(?:\s|$)")
 
     def _find_indented_heading_lines(self, document: Document) -> set[int]:
         """Return set of 1-indexed line numbers with indented headings."""
-        code_block_lines = document.code_block_lines
-        list_item_lines = self._get_list_item_lines(document)
+        skip_lines = (
+            document.code_block_lines
+            | document.html_block_lines
+            | document.front_matter_lines
+            | self._get_list_item_lines(document)
+        )
         result: set[int] = set()
 
         # Find indented setext headings (parsed as heading tokens)
@@ -85,8 +91,8 @@ Headings with leading spaces.
 
         # Find indented ATX-style headings (not parsed as headings)
         for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines inside code blocks or list items
-            if line_num in code_block_lines or line_num in list_item_lines:
+            # Skip lines inside code blocks, HTML blocks, front matter or list items
+            if line_num in skip_lines:
                 continue
 
             # Check if line looks like an indented ATX heading

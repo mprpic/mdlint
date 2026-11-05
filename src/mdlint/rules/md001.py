@@ -11,7 +11,7 @@ class MD001Config(RuleConfig):
     """Configuration for MD001 rule."""
 
     front_matter_title: str = field(
-        default=r"^\s*title\s*[:=]",
+        default=r"^title\s*[:=]",
         metadata={
             "regex": True,
             "description": (
@@ -31,11 +31,15 @@ class MD001(Rule[MD001Config]):
     summary = "Heading levels should only increment by one level at a time"
     config_class = MD001Config
 
+    ATX_OPENING_RE = re.compile(r"[ \t]*(#{1,6})")
+
     description = (
         "This rule checks that heading levels increment sequentially without "
         "skipping levels. For example, an h1 should be followed by an h2, not "
         "directly by an h3 or h4. Both ATX-style headings (using `#` characters) "
-        "and setext-style headings (using underlines with `=` or `-`) are checked."
+        "and setext-style headings (using underlines with `=` or `-`) are checked. "
+        "When fixing, the headings that follow a skipped level move up with it, so "
+        "`# A`, `### B`, `#### C` becomes `# A`, `## B`, `### C`."
     )
 
     rationale = (
@@ -110,63 +114,43 @@ class MD001(Rule[MD001Config]):
         return violations
 
     def fix(self, document: Document, config: MD001Config) -> str | None:
-        """Fix heading increment violations by adjusting heading levels."""
-        # Collect heading info: (token_index, line_0indexed, current_level, token_tag)
-        headings: list[tuple[int, int, int, str]] = []
-        for i, token in enumerate(document.tokens):
-            if token.type == "heading_open":
-                level = int(token.tag[1])
-                line = token.map[0] if token.map else 0
-                headings.append((i, line, level, token.tag))
+        """Fix heading increment violations by adjusting heading levels.
 
-        if not headings:
-            return None
-
-        # Determine the expected level for each heading
-        prev_level: int | None = None
+        Headings after an offender move with it: each heading ends up one level below the
+        nearest earlier heading of a lower original level. Moving only the offender would
+        turn ``# A/### B/#### C/### D`` into ``# A/## B/### C/### D``, making D a child of B.
+        Setext headings never change, since an h1 or h2 can never skip a level.
+        """
+        # (original level, new level) of the headings that enclose the current position
+        open_headings: list[tuple[int, int]] = []
         if (
             config.front_matter_title
             and document.front_matter
             and re.search(config.front_matter_title, document.front_matter, re.MULTILINE)
         ):
-            prev_level = 1
+            open_headings.append((1, 1))
 
-        adjustments: list[tuple[int, int, int]] = []  # (line_0indexed, old_level, new_level)
-        for _, line, level, _ in headings:
-            if prev_level is not None and level > prev_level + 1:
-                new_level = prev_level + 1
-                adjustments.append((line, level, new_level))
-                prev_level = new_level
-            else:
-                prev_level = level
+        changes: list[tuple[int, int]] = []  # (line_0indexed, new_level)
+        for token in document.tokens:
+            if token.type != "heading_open" or not token.map:
+                continue
+            level = int(token.tag[1])
+            while open_headings and open_headings[-1][0] >= level:
+                open_headings.pop()
+            new_level = open_headings[-1][1] + 1 if open_headings else level
+            open_headings.append((level, new_level))
+            if new_level != level:
+                changes.append((token.map[0], new_level))
 
-        if not adjustments:
+        if not changes:
             return None
 
         lines = document.content.split("\n")
-        for line_idx, _, new_level in reversed(adjustments):
+        for line_idx, new_level in changes:
             line = lines[line_idx]
-            # ATX heading: starts with # characters
-            atx_match = re.match(r"^(#{1,6})(\s)", line)
-            if atx_match:
-                lines[line_idx] = "#" * new_level + line[len(atx_match.group(1)) :]
-            else:
-                # Setext heading: the underline is on the next line
-                # Setext h1 uses ===, h2 uses ---
-                # If new_level <= 2, keep setext style; otherwise convert to ATX
-                if new_level <= 2:
-                    underline_char = "=" if new_level == 1 else "-"
-                    underline_line = line_idx + 1
-                    if underline_line < len(lines):
-                        old_underline = lines[underline_line]
-                        lines[underline_line] = underline_char * len(old_underline)
-                else:
-                    # Convert setext to ATX
-                    heading_text = line
-                    lines[line_idx] = "#" * new_level + " " + heading_text
-                    # Remove the underline
-                    underline_line = line_idx + 1
-                    if underline_line < len(lines):
-                        lines.pop(underline_line)
+            # Skip blockquote markers and list indentation so only the opening hashes change.
+            match = self.ATX_OPENING_RE.match(line, len(document.container_prefix(line_idx + 1)))
+            if match:
+                lines[line_idx] = line[: match.start(1)] + "#" * new_level + line[match.end(1) :]
 
         return "\n".join(lines)

@@ -6,6 +6,9 @@ from mdlint.document import Document
 from mdlint.rules.md025 import MD025, MD025Config
 from tests.conftest import load_fixture
 
+# The pattern MD001 and MD041 use by default
+_TITLE = r"^title\s*[:=]"
+
 
 class TestMD025:
     @pytest.fixture
@@ -124,3 +127,43 @@ class TestMD025:
 
         assert len(violations) == 1
         assert violations[0].line == 5
+
+    def test_front_matter_title_counts_as_top_level(self, rule: MD025) -> None:
+        """With front_matter_title set, a front matter title makes a body h1 the second one."""
+        content = load_fixture("md025", "front_matter_title.md")
+        doc = Document(Path("front_matter_title.md"), content)
+
+        violations = rule.check(doc, MD025Config(front_matter_title=_TITLE))
+
+        assert len(violations) == 1
+        assert violations[0].line == 5
+
+    def test_front_matter_without_title(self, rule: MD025) -> None:
+        """Front matter without a title does not count as a heading."""
+        content = load_fixture("md025", "front_matter_no_title.md")
+        doc = Document(Path("front_matter_no_title.md"), content)
+
+        assert rule.check(doc, MD025Config(front_matter_title=_TITLE)) == []
+
+    def test_front_matter_title_ignored_below_level_1(self, rule: MD025) -> None:
+        """A front matter title stands for an h1, so it does not count for level = 2."""
+        content = load_fixture("md025", "front_matter_title_level_2.md")
+        doc = Document(Path("front_matter_title_level_2.md"), content)
+
+        violations = rule.check(doc, MD025Config(level=2, front_matter_title=_TITLE))
+
+        assert [v.line for v in violations] == [9]
+
+    def test_nested_title_key_is_not_a_title(self, rule: MD025) -> None:
+        """Only a top-level title key counts, not one nested under another key."""
+        content = load_fixture("md025", "front_matter_nested_title.md")
+        doc = Document(Path("front_matter_nested_title.md"), content)
+
+        assert rule.check(doc, MD025Config(front_matter_title=_TITLE)) == []
+
+    def test_front_matter_title_off_by_default(self, rule: MD025, config: MD025Config) -> None:
+        """By default a front matter title is ignored, so a single body h1 is fine."""
+        content = load_fixture("md025", "front_matter_title.md")
+        doc = Document(Path("front_matter_title.md"), content)
+
+        assert rule.check(doc, config) == []

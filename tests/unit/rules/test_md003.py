@@ -353,6 +353,54 @@ class TestMD003Fix:
         doc = Document(Path("test.md"), content)
         assert rule.fix(doc, config) is None
 
+    def test_fix_multiline_setext_to_atx(self, rule: MD003) -> None:
+        """All text lines of a setext heading are joined into one ATX heading."""
+        config = MD003Config(style="atx")
+        content = load_fixture("md003", "setext_multiline.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "# Title\n\n## Line one line two\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    @pytest.mark.parametrize(
+        ("style", "expected"),
+        [
+            (
+                "atx",
+                "# Title\n\n> ## Quoted heading\n\n- ## Listed heading\n\n> # Lazy continuation\n",
+            ),
+            (
+                "atx_closed",
+                "# Title #\n\n> ## Quoted heading ##\n\n- ## Listed heading ##\n\n"
+                "> # Lazy continuation #\n",
+            ),
+        ],
+    )
+    def test_fix_setext_in_containers_to_atx(self, rule: MD003, style: str, expected: str) -> None:
+        """Converting a quoted or listed setext heading keeps its container prefix."""
+        config = MD003Config(style=style)
+        content = load_fixture("md003", "setext_in_containers.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == expected
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_atx_to_setext_declines_unsafe(self, rule: MD003) -> None:
+        """Headings after paragraph or table text, or without text, are reported but kept."""
+        config = MD003Config(style="setext")
+        content = load_fixture("md003", "atx_to_setext_declines.md")
+        doc = Document(Path("test.md"), content)
+        assert [v.line for v in rule.check(doc, config)] == [5, 9, 11, 13, 15]
+        result = rule.fix(doc, config)
+        assert result == (
+            "Title\n=====\n\nSome paragraph\n## After Paragraph\n\n| a |\n| - |\n## After Table\n\n"
+            "##\n\n> Quoted\n> ------\n\n- Listed\n  ------\n"
+        )
+        fixed_doc = Document(Path("test.md"), result)
+        assert [v.line for v in rule.check(fixed_doc, config)] == [5, 9, 11]
+        assert rule.fix(fixed_doc, config) is None
+
     def test_fixable_property(self, rule: MD003) -> None:
         """Rule should report as fixable."""
         assert rule.fixable is True
