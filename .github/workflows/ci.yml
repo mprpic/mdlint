@@ -14,3 +14,17 @@ jobs:
       matrix:
         tox_env: [ py310, py311, py312, py313, py314, lint, check-format, typecheck ]
     runs-on: ubuntu-latest
+
+  windows:
+    name: Run Tox on Windows
+    steps:
+      # Git on Windows runners checks files out with CRLF line endings, which would change
+      # the byte-exact test fixtures.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install tox
+      - run: tox -e py313
+    runs-on: windows-latest
