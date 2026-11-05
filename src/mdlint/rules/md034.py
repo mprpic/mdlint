@@ -3,7 +3,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from mdlint.document import Document
+from mdlint.document import RAW_HTML_PATTERN, Document
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -78,8 +78,8 @@ Contact us at user@example.com for support.
         re.IGNORECASE,
     )
 
-    # Pattern to match HTML tags (used to exclude URLs in attributes)
-    HTML_TAG_PATTERN = re.compile(r"<[a-zA-Z/][^>\n]*>")
+    # Inline HTML (tags that may wrap lines, comments and so on)
+    HTML_TAG_PATTERN = RAW_HTML_PATTERN
     ANCHOR_OPEN_PATTERN = re.compile(r"<a[\s>]", re.IGNORECASE)
     ANCHOR_CLOSE_PATTERN = re.compile(r"</a\s*>", re.IGNORECASE)
 
@@ -113,8 +113,9 @@ Contact us at user@example.com for support.
 
         Only inline content is scanned: front matter, code, HTML blocks and reference
         definitions are not rendered as Markdown text, so angle brackets added there
-        would show up literally or change a value. Each block's lines are joined so
-        that link text and ``<a>`` elements wrapping across lines are recognized.
+        would show up literally or change a value. Each block's lines are joined, without
+        their quote and list prefixes, so that link text and HTML tags wrapping across
+        lines are recognized.
 
         Yields tuples of (line_num, start, end, bare_text) where start/end are
         0-indexed column positions within the line.
@@ -129,15 +130,17 @@ Contact us at user@example.com for support.
             blocks[key] = blocks.get(key, False) or has_links
 
         for (first, last), has_links in blocks.items():
-            lines = document.lines[first:last]
-            text = "\n".join(lines)
+            skips = [len(document.container_prefix(n)) for n in range(first + 1, last + 1)]
+            parts = [line[skip:] for line, skip in zip(document.lines[first:last], skips)]
+            text = "\n".join(parts)
             line_starts = [0]
-            for line in lines[:-1]:
-                line_starts.append(line_starts[-1] + len(line) + 1)
+            for part in parts[:-1]:
+                line_starts.append(line_starts[-1] + len(part) + 1)
             code = {
-                line_starts[index] + column - 1
-                for index in range(len(lines))
+                line_starts[index] + column - 1 - skips[index]
+                for index in range(len(parts))
                 for column in document.code_span_positions.get(first + index + 1, ())
+                if column > skips[index]
             }
             excluded = self._excluded_ranges(text, code, has_links)
 
@@ -147,7 +150,7 @@ Contact us at user@example.com for support.
                 if start in code or self._overlaps_ranges(start, end, excluded):
                     continue
                 index = bisect.bisect_right(line_starts, start) - 1
-                column = start - line_starts[index]
+                column = start - line_starts[index] + skips[index]
                 yield first + index + 1, column, column + end - start, text[start:end]
 
     def _excluded_ranges(self, text: str, code: set[int], has_links: bool) -> list[tuple[int, int]]:

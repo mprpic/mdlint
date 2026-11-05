@@ -400,6 +400,28 @@ Some text:
         assert rule.check(doc, config) == []
         assert _fix_idempotent(rule, config, content) is None
 
+    def test_html_wrapping_across_lines(self, rule: MD034, config: MD034Config) -> None:
+        """URLs in tags and comments that wrap lines are skipped; text that is not HTML is not."""
+        content = load_fixture("md034", "html_across_lines.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (10, 45, "Bare URL used: https://example.com/bare"),
+            (17, 13, "Bare URL used: https://example.com/not-a-tag"),
+        ]
+
+    def test_fix_html_wrapping_across_lines(self, rule: MD034, config: MD034Config) -> None:
+        """Fix leaves wrapped tags intact and only wraps the bare URLs."""
+        content = load_fixture("md034", "html_across_lines.md")
+
+        result = _fix_idempotent(rule, config, content)
+
+        assert result == content.replace(
+            "https://example.com/bare.", "<https://example.com/bare>."
+        ).replace("https://example.com/not-a-tag", "<https://example.com/not-a-tag>")
+
 
 def _fix_idempotent(rule: MD034, config: MD034Config, content: str) -> str | None:
     """Fix content and assert that fixing the result again changes nothing."""
