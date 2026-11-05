@@ -1,3 +1,4 @@
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Literal
@@ -5,6 +6,10 @@ from typing import Literal
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
+
+# A rebuilt row starting like this would open a list item or heading instead of continuing
+# the table, e.g. "+|x" padded to "+ | x".
+_BLOCK_START = re.compile(r"(?:[-+*]|\d{1,9}[.)]|#{1,6})(?:[ \t]|$)")
 
 
 @dataclass
@@ -57,7 +62,10 @@ class MD060(Rule[MD060Config]):
         "vertically aligned (using visual width for CJK/emoji characters), "
         "`compact` with single space around content (empty cells may use a single "
         "space), and `tight` with no padding. The `any` style accepts any "
-        "consistent style."
+        "consistent style. Blockquote markers and list indentation before a row "
+        "are not counted as padding. The fix leaves a table unchanged when padding "
+        "a first cell such as `+`, `1.` or `#` would turn its row into a list item "
+        "or heading."
     )
 
     rationale = (
@@ -114,6 +122,21 @@ class MD060(Rule[MD060Config]):
 
         return tables
 
+    @staticmethod
+    def _get_rows(document: Document, table_range: tuple[int, int]) -> list[tuple[int, str]]:
+        """Return (line_number, text) for each table row, without its container prefix.
+
+        Blockquote markers and list indentation are not part of the table, so measuring
+        them would count them as cell padding.
+        """
+        start_line, end_line = table_range
+        rows: list[tuple[int, str]] = []
+        for line_num in range(start_line, end_line + 1):
+            line = document.get_line(line_num)
+            if line is not None:
+                rows.append((line_num, line[len(document.container_prefix(line_num)) :]))
+        return rows
+
     def _check_table(
         self,
         document: Document,
@@ -132,14 +155,7 @@ class MD060(Rule[MD060Config]):
         Returns:
             List of violations for this table.
         """
-        start_line, end_line = table_range
-
-        # Get all table rows
-        rows: list[tuple[int, str]] = []
-        for line_num in range(start_line, end_line + 1):
-            line = document.get_line(line_num)
-            if line is not None:
-                rows.append((line_num, line))
+        rows = self._get_rows(document, table_range)
 
         if len(rows) < 2:
             return []
@@ -220,6 +236,7 @@ class MD060(Rule[MD060Config]):
         # Check all other rows
         for line_num, line in rows[1:]:
             row_info = self._get_pipe_info(line)
+            offset = len(document.container_prefix(line_num))
 
             # Compare visual positions
             for i, (char_idx, visual_pos) in enumerate(row_info):
@@ -228,7 +245,7 @@ class MD060(Rule[MD060Config]):
                         violations.append(
                             Violation(
                                 line=line_num,
-                                column=char_idx + 1,
+                                column=offset + char_idx + 1,
                                 rule_id=self.id,
                                 rule_name=self.name,
                                 message=msg,
@@ -246,19 +263,20 @@ class MD060(Rule[MD060Config]):
         Args:
             document: The document being checked.
             line_num: Line number.
-            line: Line content.
+            line: Line content after its container prefix.
 
         Returns:
             Tuple of (compact_violations, tight_violations).
         """
         compact_violations: list[Violation] = []
         tight_violations: list[Violation] = []
+        offset = len(document.container_prefix(line_num))
 
         # Find pipe positions (skip escaped pipes)
         i = 0
         while i < len(line):
             if line[i] == "|" and (i == 0 or line[i - 1] != "\\"):
-                col = i + 1  # 1-indexed column
+                col = offset + i + 1  # 1-indexed column
 
                 # Check space to the left (if not at start of line)
                 if i > 0:
@@ -369,11 +387,7 @@ class MD060(Rule[MD060Config]):
         changed = False
 
         for start_line, end_line in tables:
-            rows: list[tuple[int, str]] = []
-            for line_num in range(start_line, end_line + 1):
-                line = document.get_line(line_num)
-                if line is not None:
-                    rows.append((line_num, line))
+            rows = self._get_rows(document, (start_line, end_line))
 
             if len(rows) < 2:
                 continue
@@ -396,10 +410,11 @@ class MD060(Rule[MD060Config]):
 
             # Parse all rows into cells
             parsed: list[tuple[int, list[str], bool, bool, bool]] = []
-            for line_num, line in rows:
+            for index, (line_num, line) in enumerate(rows):
                 cells, has_leading, has_trailing = self._split_cells(line)
-                is_delim = self._is_delimiter_cells(cells)
-                parsed.append((line_num, cells, has_leading, has_trailing, is_delim))
+                # The delimiter row is always the table's second line; a body row made of
+                # dashes is content and must not be reformatted like one.
+                parsed.append((line_num, cells, has_leading, has_trailing, index == 1))
 
             # Calculate column widths for aligned style
             col_widths: list[int] | None = None
@@ -413,8 +428,9 @@ class MD060(Rule[MD060Config]):
                 delim_widths = [self._visual_width(c) for c in header_cells]
 
             # Format each row
+            new_rows: list[tuple[int, str]] = []
             for line_num, cells, has_leading, has_trailing, is_delim in parsed:
-                new_line = self._build_table_line(
+                new_row = self._build_table_line(
                     cells,
                     has_leading,
                     has_trailing,
@@ -423,6 +439,15 @@ class MD060(Rule[MD060Config]):
                     delim_widths=delim_widths if is_delim else None,
                     is_delim=is_delim,
                 )
+                new_rows.append((line_num, new_row))
+
+            # Padding a first cell such as "+" or "1." turns its row into a list item or
+            # heading and splits the table, so such tables are left for the writer to fix.
+            if any(_BLOCK_START.match(new_row) for _, new_row in new_rows):
+                continue
+
+            for line_num, new_row in new_rows:
+                new_line = document.container_prefix(line_num) + new_row
                 if lines[line_num - 1] != new_line:
                     lines[line_num - 1] = new_line
                     changed = True
@@ -505,18 +530,23 @@ class MD060(Rule[MD060Config]):
         return cells, has_leading, has_trailing
 
     @staticmethod
-    def _is_delimiter_cells(cells: list[str]) -> bool:
-        """Check if cells represent a delimiter row."""
-        return bool(cells) and all(c and set(c) <= {"-", ":"} and "-" in c for c in cells)
+    def _min_delimiter_dashes(index: int, has_leading: bool) -> int:
+        """Fewest dashes a delimiter cell may have.
+
+        Without a leading pipe, a lone "-" first cell followed by a space ("- |") opens a
+        list item instead of continuing the table.
+        """
+        return 2 if index == 0 and not has_leading else 1
 
     def _calc_col_widths(self, parsed: list[tuple[int, list[str], bool, bool, bool]]) -> list[int]:
-        """Calculate max visual width per column (excluding delimiter rows)."""
+        """Calculate max visual width per column, leaving room for the shortest delimiter."""
         max_widths: list[int] = []
-        for _, cells, _, _, is_delim in parsed:
-            if is_delim:
-                continue
+        for _, cells, has_leading, _, is_delim in parsed:
             for i, cell in enumerate(cells):
-                w = self._visual_width(cell)
+                if is_delim:
+                    w = cell.count(":") + self._min_delimiter_dashes(i, has_leading)
+                else:
+                    w = self._visual_width(cell)
                 if i >= len(max_widths):
                     max_widths.append(w)
                 else:
@@ -542,10 +572,14 @@ class MD060(Rule[MD060Config]):
             is_last = i == n - 1
 
             # Determine formatted content
-            if is_delim and delim_widths and i < len(delim_widths):
-                content = self._format_delimiter_cell(cell, delim_widths[i])
-            elif is_delim and style == "aligned" and col_widths and i < len(col_widths):
-                content = self._format_delimiter_cell(cell, col_widths[i])
+            if is_delim:
+                width = len(cell)
+                if delim_widths and i < len(delim_widths):
+                    width = delim_widths[i]
+                elif style == "aligned" and col_widths and i < len(col_widths):
+                    width = col_widths[i]
+                min_dashes = self._min_delimiter_dashes(i, has_leading)
+                content = self._format_delimiter_cell(cell, width, min_dashes)
             elif style == "aligned" and col_widths and i < len(col_widths):
                 padding = col_widths[i] - self._visual_width(cell)
                 content = cell + " " * max(padding, 0)
@@ -573,7 +607,7 @@ class MD060(Rule[MD060Config]):
         return result
 
     @staticmethod
-    def _format_delimiter_cell(cell: str, width: int) -> str:
+    def _format_delimiter_cell(cell: str, width: int, min_dashes: int) -> str:
         """Format a delimiter cell to the specified width, preserving alignment markers."""
         left_colon = cell.startswith(":")
         right_colon = cell.endswith(":")
@@ -583,7 +617,7 @@ class MD060(Rule[MD060Config]):
             dash_count -= 1
         if right_colon:
             dash_count -= 1
-        dash_count = max(dash_count, 1)
+        dash_count = max(dash_count, min_dashes)
 
         result = ""
         if left_colon:

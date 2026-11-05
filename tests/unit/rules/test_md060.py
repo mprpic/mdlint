@@ -7,6 +7,28 @@ from mdlint.rules.md060 import MD060, MD060Config
 from tests.conftest import load_fixture
 
 
+def _table_cells(content: str) -> list[list[list[str]]]:
+    """Cell text of every table, so tests can prove a fix kept the table intact."""
+    tables: list[list[list[str]]] = []
+    in_table = False
+    for token in Document(Path("test.md"), content).tokens:
+        if token.type == "table_open":
+            tables.append([])
+            in_table = True
+        elif token.type == "table_close":
+            in_table = False
+        elif in_table and token.type == "tr_open":
+            tables[-1].append([])
+        elif in_table and token.type == "inline":
+            tables[-1][-1].append(token.content)
+    return tables
+
+
+def _apply_fix(rule: MD060, content: str, config: MD060Config) -> str:
+    result = rule.fix(Document(Path("test.md"), content), config)
+    return content if result is None else result
+
+
 class TestMD060:
     @pytest.fixture
     def rule(self) -> MD060:
@@ -245,6 +267,54 @@ class TestMD060:
 
         assert len(violations) == 0
 
+    @pytest.mark.parametrize("style", ["any", "compact"])
+    def test_list_item_indentation_is_not_padding(
+        self, rule: MD060, style: MD060Config.TableStyle
+    ) -> None:
+        """List item indentation before a row's first pipe is not cell padding."""
+        config = MD060Config(style=style)
+        content = load_fixture("md060", "list_item_compact.md")
+        doc = Document(Path("list_item_compact.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_blockquote_marker_is_not_padding(self, rule: MD060) -> None:
+        """The space after a blockquote marker is not cell padding."""
+        config = MD060Config(style="tight")
+        content = load_fixture("md060", "blockquote_tight.md")
+        doc = Document(Path("blockquote_tight.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_containers_columns(self, rule: MD060) -> None:
+        """Only unpadded rows are flagged, with columns that count the container prefix."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "containers.md")
+        doc = Document(Path("containers.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert {v.line for v in violations} == {7, 11, 17}
+        first = {v.line: v for v in reversed(violations)}
+        assert first[7].column == 4
+        assert first[11].column == 3
+        assert first[17].column == 5
+        assert all(v.message == MD060.MSG_COMPACT_MISSING_RIGHT for v in first.values())
+
+    def test_block_start_first_cell_reported(self, rule: MD060) -> None:
+        """Tables whose fix would start a list or heading are still reported."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "block_start_first_cell.md")
+        doc = Document(Path("block_start_first_cell.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert {3, 9, 13} <= {v.line for v in violations}
+
 
 class TestMD060Fix:
     @pytest.fixture
@@ -415,3 +485,79 @@ class TestMD060Fix:
         assert result is not None
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    @pytest.mark.parametrize("style", ["any", "aligned", "compact", "tight"])
+    def test_fix_single_dash_delimiter(self, rule: MD060, style: MD060Config.TableStyle) -> None:
+        """A delimiter row without a leading pipe never becomes a list item."""
+        config = MD060Config(style=style)
+        content = load_fixture("md060", "single_dash_delimiter.md")
+        result = _apply_fix(rule, content, config)
+        assert result != content
+        assert _table_cells(result) == _table_cells(content)
+        assert _apply_fix(rule, result, config) == result
+        if style != "any":
+            assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_single_dash_delimiter_compact_output(self, rule: MD060) -> None:
+        """A lone dash first delimiter cell is widened instead of becoming a list marker."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "single_dash_delimiter.md")
+        result = _apply_fix(rule, content, config)
+        assert "Header |\n-- |\nText |\n" in result
+        assert "a | b\n-- | -\nx | y\n" in result
+
+    def test_fix_single_dash_delimiter_aligned_output(self, rule: MD060) -> None:
+        """Aligned columns grow to fit the widened delimiter cell."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "single_dash_delimiter.md")
+        result = _apply_fix(rule, content, config)
+        assert "a  | b\n-- | -\nx  | y\n" in result
+
+    @pytest.mark.parametrize(
+        ("style", "fixed_table"),
+        [
+            ("aligned", "a  | b\n-- | -\nx  | y\n"),
+            ("compact", "a | b\n-- | -\nx | y\n"),
+        ],
+    )
+    def test_fix_declines_block_start_first_cell(
+        self, rule: MD060, style: MD060Config.TableStyle, fixed_table: str
+    ) -> None:
+        """Tables whose padded first cell would start a list or heading are left unchanged."""
+        config = MD060Config(style=style)
+        content = load_fixture("md060", "block_start_first_cell.md")
+        result = _apply_fix(rule, content, config)
+        head, tail = content.rsplit("a|b\n--|-\nx|y\n", 1)
+        assert result == head + fixed_table + tail
+        assert _table_cells(result) == _table_cells(content)
+        assert _apply_fix(rule, result, config) == result
+
+    def test_fix_containers_compact(self, rule: MD060) -> None:
+        """Rows in list items and blockquotes keep their container prefix."""
+        config = MD060Config(style="compact")
+        content = load_fixture("md060", "containers.md")
+        result = _apply_fix(rule, content, config)
+        assert result == content.replace("|x|y|", "| x | y |")
+        assert _table_cells(result) == _table_cells(content)
+        assert _apply_fix(rule, result, config) == result
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_containers_tight(self, rule: MD060) -> None:
+        """Tight rows in containers keep the prefix and its trailing space."""
+        config = MD060Config(style="tight")
+        content = load_fixture("md060", "containers.md")
+        result = _apply_fix(rule, content, config)
+        assert result == content.replace("| a | b |", "|a|b|").replace("| - | - |", "|-|-|")
+        assert _table_cells(result) == _table_cells(content)
+        assert _apply_fix(rule, result, config) == result
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_containers_aligned(self, rule: MD060) -> None:
+        """Aligned fix measures columns after the container prefix."""
+        config = MD060Config(style="aligned")
+        content = load_fixture("md060", "containers.md")
+        result = _apply_fix(rule, content, config)
+        assert result == content.replace("|x|y|", "| x | y |")
+        assert _table_cells(result) == _table_cells(content)
+        assert _apply_fix(rule, result, config) == result
+        assert rule.check(Document(Path("test.md"), result), config) == []
