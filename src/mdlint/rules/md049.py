@@ -1,9 +1,99 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
+from markdown_it import MarkdownIt
+from markdown_it.rules_inline import emphasis
+from markdown_it.rules_inline.state_inline import StateInline
+from markdown_it.token import Token
+
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
+
+_EMPHASIS_TYPES = ("em_open", "em_close", "strong_open", "strong_close")
+
+
+def _record_delimiter_offsets(state: StateInline, silent: bool) -> bool:
+    """Run markdown-it's emphasis tokenizer, tagging each delimiter with its source offset.
+
+    Parsed em/strong tokens carry no position, and searching the text for their markup
+    finds ``*`` and ``_`` in code spans, URLs and escapes too. The tokens a delimiter run
+    produces are the ones later turned into em/strong tokens, so the tag survives.
+    """
+    start = state.pos
+    if not emphasis.tokenize(state, silent):
+        return False
+    length = state.pos - start
+    for offset, token in enumerate(state.tokens[len(state.tokens) - length :]):
+        token.meta["delimiter_offset"] = start + offset
+    return True
+
+
+_OFFSET_PARSER = MarkdownIt()
+_OFFSET_PARSER.inline.ruler.at("emphasis", _record_delimiter_offsets)
+
+
+def emphasis_marker_positions(
+    document: Document, token: Token, line_cursors: dict[int, int]
+) -> dict[int, tuple[int, int]]:
+    """Map the em/strong children of an inline token to the raw (line, column) of their markup.
+
+    Shared by MD049 and MD050 so that fixes rewrite the markers themselves. The inline
+    content is re-parsed with delimiter offsets recorded, and the offsets are trusted only
+    when that parse yields the same em/strong sequence as the document and the raw line
+    holds the expected markup at the computed column; anything else is left out.
+
+    Each content line is located in its raw line after the container prefix. Table cells
+    share a line, so ``line_cursors`` carries the search start from one cell to the next and
+    must be shared across all inline tokens of a document, in order.
+    """
+    if not token.map:
+        return {}
+
+    # (offset of the line in the content, 1-indexed line, 0-indexed column or -1)
+    content_lines: list[tuple[int, int, int]] = []
+    offset = 0
+    for index, content_line in enumerate(token.content.split("\n")):
+        line_num = token.map[0] + 1 + index
+        raw = document.get_line(line_num) or ""
+        start = line_cursors.get(line_num, len(document.container_prefix(line_num)))
+        column = raw.find(content_line, start)
+        if column >= 0:
+            line_cursors[line_num] = column + len(content_line)
+        content_lines.append((offset, line_num, column))
+        offset += len(content_line) + 1
+
+    wanted = [
+        (index, child)
+        for index, child in enumerate(token.children or [])
+        if child.type in _EMPHASIS_TYPES
+    ]
+    if not wanted:
+        return {}
+    reparsed = [
+        child
+        for child in _OFFSET_PARSER.parseInline(token.content)[0].children or []
+        if child.type in _EMPHASIS_TYPES
+    ]
+    if [(c.type, c.markup) for c in reparsed] != [(c.type, c.markup) for _, c in wanted]:
+        return {}
+
+    positions: dict[int, tuple[int, int]] = {}
+    for (index, child), parsed in zip(wanted, reparsed, strict=True):
+        # A strong pair is tagged on its inner delimiter: the second "*" of an opener.
+        marker_offset = parsed.meta["delimiter_offset"]
+        if child.type == "strong_open":
+            marker_offset -= 1
+        line_offset, line_num, column = next(
+            entry for entry in reversed(content_lines) if entry[0] <= marker_offset
+        )
+        if column < 0:
+            continue
+        column += marker_offset - line_offset
+        raw = document.get_line(line_num) or ""
+        if raw[column : column + len(child.markup)] == child.markup:
+            positions[index] = (line_num, column + 1)
+    return positions
 
 
 @dataclass
@@ -77,22 +167,15 @@ But this uses _italic_ with underscores.
             expected_style = config.style
 
         code_block_lines = document.code_block_lines
+        line_cursors: dict[int, int] = {}
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            base_line = token.map[0] + 1
-            search_pos = 0
+            positions = emphasis_marker_positions(document, token, line_cursors)
 
             for i, child in enumerate(token.children):
-                # Advance past marker tokens to keep search_pos correct
-                if child.type in ("em_close", "strong_open", "strong_close") and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup)
-                    continue
-
                 if child.type != "em_open":
                     continue
 
@@ -100,9 +183,7 @@ But this uses _italic_ with underscores.
                 if marker not in self.MARKER_TO_STYLE:
                     continue
 
-                line, column, search_pos = self._find_marker_position(
-                    token.content, marker, search_pos, base_line
-                )
+                line, column = positions.get(i, (token.map[0] + 1, 1))
 
                 if line in code_block_lines:
                     continue
@@ -134,22 +215,6 @@ But this uses _italic_ with underscores.
                     )
 
         return violations
-
-    @staticmethod
-    def _find_marker_position(
-        content: str, marker: str, search_pos: int, base_line: int
-    ) -> tuple[int, int, int]:
-        """Find line and column of a marker in raw inline content."""
-        pos = content.find(marker, search_pos)
-        if pos < 0:
-            return base_line, 1, search_pos
-
-        text_before = content[:pos]
-        line_offset = text_before.count("\n")
-        last_nl = text_before.rfind("\n")
-        column = pos - last_nl  # 1-indexed (rfind returns -1 when no \n)
-
-        return base_line + line_offset, column, pos + len(marker)
 
     @staticmethod
     def _is_intraword_emphasis(children: list, em_open_index: int) -> bool:
@@ -207,45 +272,34 @@ But this uses _italic_ with underscores.
 
         # Collect (line_1indexed, column_1indexed) positions to replace
         replacements: list[tuple[int, int]] = []
+        line_cursors: dict[int, int] = {}
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            base_line = token.map[0] + 1
-            search_pos = 0
-            # Track whether each em_open should be fixed; pop on em_close
-            fix_stack: list[bool] = []
+            positions = emphasis_marker_positions(document, token, line_cursors)
+            # Opener position of each open em if it should be fixed, None otherwise
+            fix_stack: list[tuple[int, int] | None] = []
 
             for i, child in enumerate(token.children):
-                if child.type in ("strong_open", "strong_close") and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup)
-                    continue
-
                 if child.type == "em_open":
                     marker = child.markup
                     if marker not in self.MARKER_TO_STYLE:
                         continue
 
-                    line, column, search_pos = self._find_marker_position(
-                        token.content, marker, search_pos, base_line
-                    )
-
+                    position = positions.get(i)
                     current_style = self.MARKER_TO_STYLE[marker]
                     should_fix = (
-                        current_style != expected_style
-                        and line not in code_block_lines
+                        position is not None
+                        and current_style != expected_style
+                        and position[0] not in code_block_lines
                         and not (
                             expected_style == "underscore"
                             and self._is_intraword_emphasis(token.children, i)
                         )
                     )
-                    fix_stack.append(should_fix)
-
-                    if should_fix:
-                        replacements.append((line, column))
+                    fix_stack.append(position if should_fix else None)
                     continue
 
                 if child.type == "em_close":
@@ -253,13 +307,11 @@ But this uses _italic_ with underscores.
                     if marker not in self.MARKER_TO_STYLE:
                         continue
 
-                    line, column, search_pos = self._find_marker_position(
-                        token.content, marker, search_pos, base_line
-                    )
-
-                    should_fix = fix_stack.pop() if fix_stack else False
-                    if should_fix:
-                        replacements.append((line, column))
+                    open_position = fix_stack.pop() if fix_stack else None
+                    close_position = positions.get(i)
+                    # Rewrite both markers or neither, so a pair is never left mismatched
+                    if open_position is not None and close_position is not None:
+                        replacements.extend((open_position, close_position))
                     continue
 
         if not replacements:

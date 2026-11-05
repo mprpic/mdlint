@@ -22,7 +22,10 @@ class MD037(Rule[MD037Config]):
     description = (
         "This rule is triggered when emphasis markers (bold, italic) are used, "
         "but they have spaces between the markers and the text. For example, "
-        "`** bold **` instead of `**bold**`."
+        "`** bold **` instead of `**bold**`. Escaped markers such as `\\*` and "
+        "`\\_` are literal text and are not flagged. This rule is not auto-fixable: "
+        "spaced asterisks are often literal, as in `2 * 3 * 4`, and removing the "
+        "spaces would turn them into emphasis the author never intended."
     )
 
     rationale = (
@@ -142,83 +145,23 @@ Underscores also fail: __ bold __ and _ italic _.
 
         return violations
 
-    def fix(self, document: Document, config: MD037Config) -> str | None:
-        """Fix spaces inside emphasis markers by stripping them."""
-        changed = False
-        lines = document.content.split("\n")
-
-        for token in document.tokens:
-            if token.type != "inline" or not token.children or not token.map:
-                continue
-
-            current_line = token.map[0] + 1  # 1-indexed
-            used_ranges: dict[int, list[tuple[int, int]]] = {}
-
-            for child in token.children:
-                if child.type in ("softbreak", "hardbreak"):
-                    current_line += 1
-                    continue
-                if child.type != "text":
-                    continue
-
-                if "*" not in child.content and "_" not in child.content:
-                    continue
-
-                source_line = lines[current_line - 1]
-                if not source_line:
-                    continue
-
-                for marker in self.MARKERS:
-                    pattern = self._PATTERNS[marker]
-                    for match in pattern.finditer(child.content):
-                        match_text = match.group(0)
-                        content = match.group(1)
-
-                        has_leading_space = content[0].isspace()
-                        has_trailing_space = content[-1].isspace()
-
-                        if not has_leading_space and not has_trailing_space:
-                            continue
-
-                        line_ranges = used_ranges.setdefault(current_line, [])
-                        source_pos = self._find_in_source(match_text, source_line, line_ranges)
-                        if source_pos < 0:
-                            continue
-
-                        line_ranges.append((source_pos, source_pos + len(match_text)))
-
-                        fixed_text = marker + content.strip() + marker
-                        source_line = (
-                            source_line[:source_pos]
-                            + fixed_text
-                            + source_line[source_pos + len(match_text) :]
-                        )
-                        lines[current_line - 1] = source_line
-
-                        # Adjust used ranges for the length change
-                        diff = len(fixed_text) - len(match_text)
-                        if diff != 0:
-                            line_ranges[-1] = (source_pos, source_pos + len(fixed_text))
-                            for i in range(len(line_ranges) - 1):
-                                s, e = line_ranges[i]
-                                if s > source_pos:
-                                    line_ranges[i] = (s + diff, e + diff)
-
-                        changed = True
-
-        if not changed:
-            return None
-
-        return "\n".join(lines)
-
     @staticmethod
     def _find_in_source(text: str, source_line: str, used_ranges: list[tuple[int, int]]) -> int:
-        """Find text in source line, skipping already-used ranges."""
+        """Find text in source line, skipping already-used ranges and escaped openers.
+
+        Text tokens have backslash escapes resolved, so ``\\* x *`` reaches the pattern as
+        ``* x *``. A source match whose opening marker follows an odd run of backslashes is
+        that escaped literal, not an emphasis marker.
+        """
         start = 0
         while True:
             idx = source_line.find(text, start)
             if idx < 0:
                 return -1
+            backslashes = idx - len(source_line[:idx].rstrip("\\"))
+            if backslashes % 2:
+                start = idx + 1
+                continue
             end = idx + len(text)
             overlaps = False
             for r_start, r_end in used_ranges:

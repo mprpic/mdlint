@@ -3,6 +3,7 @@ from typing import Literal
 
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
+from mdlint.rules.md049 import emphasis_marker_positions
 from mdlint.violation import Violation
 
 
@@ -76,39 +77,15 @@ But this uses __underscores__ for bold.
         if config.style in ("asterisk", "underscore"):
             expected_style = config.style
 
+        line_cursors: dict[int, int] = {}
+
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            base_line = token.map[0] + 1
-            search_pos = 0
+            positions = emphasis_marker_positions(document, token, line_cursors)
 
-            for child in token.children:
-                # Advance past non-strong tokens to keep search_pos correct
-                if child.type in ("strong_close", "em_open", "em_close") and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup)
-                    continue
-
-                if child.type == "text" and child.content:
-                    pos = token.content.find(child.content, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.content)
-                    continue
-
-                if child.type == "softbreak":
-                    pos = token.content.find("\n", search_pos)
-                    if pos >= 0:
-                        search_pos = pos + 1
-                    continue
-
-                if child.type == "code_inline" and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup) * 2 + len(child.content)
-                    continue
-
+            for i, child in enumerate(token.children):
                 if child.type != "strong_open":
                     continue
 
@@ -116,9 +93,7 @@ But this uses __underscores__ for bold.
                 if marker not in self.MARKUP_TO_STYLE:
                     continue
 
-                line, column, search_pos = self._find_marker_position(
-                    token.content, marker, search_pos, base_line
-                )
+                line, column = positions.get(i, (token.map[0] + 1, 1))
 
                 current_style = self.MARKUP_TO_STYLE[marker]
 
@@ -162,58 +137,28 @@ But this uses __underscores__ for bold.
             return None
 
         target_marker = "**" if expected_style == "asterisk" else "__"
-        wrong_marker = "__" if expected_style == "asterisk" else "**"
 
-        # Collect line numbers (1-indexed) with count of markers to replace per line
-        replacements_per_line: dict[int, int] = {}
+        # Collect (line_1indexed, column_1indexed) positions of markers to replace
+        replacements: list[tuple[int, int]] = []
+        line_cursors: dict[int, int] = {}
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
                 continue
 
-            base_line = token.map[0] + 1
-            search_pos = 0
-            fix_stack: list[bool] = []
+            positions = emphasis_marker_positions(document, token, line_cursors)
+            # Opener position of each open strong if it should be fixed, None otherwise
+            fix_stack: list[tuple[int, int] | None] = []
 
-            for child in token.children:
-                if child.type in ("em_open", "em_close") and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup)
-                    continue
-
-                if child.type == "text" and child.content:
-                    pos = token.content.find(child.content, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.content)
-                    continue
-
-                if child.type == "softbreak":
-                    pos = token.content.find("\n", search_pos)
-                    if pos >= 0:
-                        search_pos = pos + 1
-                    continue
-
-                if child.type == "code_inline" and child.markup:
-                    pos = token.content.find(child.markup, search_pos)
-                    if pos >= 0:
-                        search_pos = pos + len(child.markup) * 2 + len(child.content)
-                    continue
-
+            for i, child in enumerate(token.children):
                 if child.type == "strong_open":
                     marker = child.markup
                     if marker not in self.MARKUP_TO_STYLE:
                         continue
 
-                    line, _, search_pos = self._find_marker_position(
-                        token.content, marker, search_pos, base_line
-                    )
-
+                    position = positions.get(i)
                     should_fix = self.MARKUP_TO_STYLE[marker] != expected_style
-                    fix_stack.append(should_fix)
-
-                    if should_fix:
-                        replacements_per_line[line] = replacements_per_line.get(line, 0) + 1
+                    fix_stack.append(position if should_fix else None)
                     continue
 
                 if child.type == "strong_close":
@@ -221,45 +166,21 @@ But this uses __underscores__ for bold.
                     if marker not in self.MARKUP_TO_STYLE:
                         continue
 
-                    line, _, search_pos = self._find_marker_position(
-                        token.content, marker, search_pos, base_line
-                    )
-
-                    should_fix = fix_stack.pop() if fix_stack else False
-                    if should_fix:
-                        replacements_per_line[line] = replacements_per_line.get(line, 0) + 1
+                    open_position = fix_stack.pop() if fix_stack else None
+                    close_position = positions.get(i)
+                    # Rewrite both markers or neither, so a pair is never left mismatched
+                    if open_position is not None and close_position is not None:
+                        replacements.extend((open_position, close_position))
                     continue
 
-        if not replacements_per_line:
+        if not replacements:
             return None
 
         lines = document.content.split("\n")
-        for line_num, count in replacements_per_line.items():
+        for line_num, column in sorted(replacements, reverse=True):
             line_idx = line_num - 1
+            col_idx = column - 1
             line = lines[line_idx]
-            search_from = 0
-            for _ in range(count):
-                pos = line.find(wrong_marker, search_from)
-                if pos < 0:
-                    break
-                line = line[:pos] + target_marker + line[pos + 2 :]
-                search_from = pos + 2
-            lines[line_idx] = line
+            lines[line_idx] = line[:col_idx] + target_marker + line[col_idx + 2 :]
 
         return "\n".join(lines)
-
-    @staticmethod
-    def _find_marker_position(
-        content: str, marker: str, search_pos: int, base_line: int
-    ) -> tuple[int, int, int]:
-        """Find line and column of a marker in raw inline content."""
-        pos = content.find(marker, search_pos)
-        if pos < 0:
-            return base_line, 1, search_pos
-
-        text_before = content[:pos]
-        line_offset = text_before.count("\n")
-        last_nl = text_before.rfind("\n")
-        column = pos - last_nl  # 1-indexed (rfind returns -1 when no \n)
-
-        return base_line + line_offset, column, pos + len(marker)

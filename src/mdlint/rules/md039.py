@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from mdlint.document import Document
+from mdlint.document import Document, normalize_reference_label
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -108,8 +108,9 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
                     raw_text = "".join(raw_parts)
                     target = "[" + raw_text + "]"
                     idx = source.find(target, search_offset)
-                    # Skip image brackets (preceded by !)
-                    while idx > 0 and source[idx - 1] == "!":
+                    while idx >= 0 and not self._is_link_at(
+                        document, source, idx, raw_text, source_lines
+                    ):
                         idx = source.find(target, idx + 1)
 
                     if idx < 0:
@@ -163,24 +164,52 @@ And [ spaces on both sides ](https://example.net/) is also wrong.
 
     def fix(self, document: Document, config: MD039Config) -> str | None:
         """Fix spaces inside link text by stripping leading/trailing spaces."""
-        replacements: dict[int, list[tuple[str, str]]] = {}
+        content = document.content
+        line_starts = [0]
+        for line in content.split("\n"):
+            line_starts.append(line_starts[-1] + len(line) + 1)
 
-        for line_num, _, raw_text, _, _ in self._find_spaced_links(document):
-            target = "[" + raw_text + "]"
-            new_target = "[" + raw_text.strip() + "]"
-            replacements.setdefault(line_num, []).append((target, new_target))
+        edits: list[tuple[int, str, str]] = []
+        for line_num, column, raw_text, _, _ in self._find_spaced_links(document):
+            start = line_starts[line_num - 1] + column - 1
+            edits.append((start, "[" + raw_text + "]", "[" + raw_text.strip() + "]"))
 
-        if not replacements:
-            return None
+        changed = False
+        for start, old, new in sorted(edits, reverse=True):
+            # Line endings other than "\n" shift multi-line text, so confirm before editing.
+            if content[start : start + len(old)] != old:
+                continue
+            content = content[:start] + new + content[start + len(old) :]
+            changed = True
 
-        lines = document.content.split("\n")
-        for line_num, line_replacements in replacements.items():
-            line = lines[line_num - 1]
-            for old, new in line_replacements:
-                line = line.replace(old, new, 1)
-            lines[line_num - 1] = line
+        return content if changed else None
 
-        return "\n".join(lines)
+    @staticmethod
+    def _is_link_at(
+        document: Document,
+        source: str,
+        idx: int,
+        raw_text: str,
+        source_lines: list[tuple[int, str]],
+    ) -> bool:
+        """Whether the bracketed text at ``idx`` is the link itself.
+
+        The same bracketed text can appear earlier as plain text, in a code span, escaped or
+        as an image, and editing that occurrence instead would leave the link unfixed.
+        """
+        if idx > 0 and source[idx - 1] == "!":
+            return False
+        backslashes = idx - len(source[:idx].rstrip("\\"))
+        if backslashes % 2:
+            return False
+        line_num, column = MD039._source_idx_to_position(idx, source_lines)
+        if column in document.code_span_positions.get(line_num, set()):
+            return False
+        following = source[idx + len(raw_text) + 2 : idx + len(raw_text) + 3]
+        if following in ("(", "["):
+            return True
+        # Shortcut reference link: only a link when its label is defined.
+        return normalize_reference_label(raw_text) in document.reference_definitions
 
     @staticmethod
     def _source_idx_to_position(idx: int, source_lines: list[tuple[int, str]]) -> tuple[int, int]:

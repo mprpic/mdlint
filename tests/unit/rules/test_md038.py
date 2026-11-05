@@ -300,3 +300,31 @@ class TestMD038:
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_container_prefix_not_part_of_span(self, rule: MD038, config: MD038Config) -> None:
+        """Quote markers and list indentation are not code span content."""
+        content = load_fixture("md038", "container_prefix.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (6, 11, "Code span has leading space(s)"),
+            (8, 12, "Code span has leading space(s)"),
+            (11, 22, "Code span has trailing space(s)"),
+        ]
+
+    def test_fix_container_prefix(self, rule: MD038, config: MD038Config) -> None:
+        """Fix strips span padding and leaves quote markers and list indentation alone."""
+        content = load_fixture("md038", "container_prefix.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        lines = result.splitlines()
+        assert lines[2:4] == ["> A `foo", "> ` bar span wraps inside a quote."]
+        assert lines[5] == "> Quoted `leading` space."
+        assert lines[7:9] == ["> Wrapped `quoted", "> span` here."]
+        assert lines[10] == "- Item with `trailing` space."
+        assert rule.fix(Document(Path("test.md"), result), config) is None

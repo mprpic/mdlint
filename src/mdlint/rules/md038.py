@@ -64,9 +64,8 @@ This has `  spaces on both sides  ` in code.
 
             start_line_1 = token.map[0] + 1
             end_line_1 = token.map[1]
-            source_lines = [
-                document.get_line(ln) or "" for ln in range(start_line_1, end_line_1 + 1)
-            ]
+            raw_lines = [document.get_line(ln) or "" for ln in range(start_line_1, end_line_1 + 1)]
+            prefixes, source_lines = _strip_container_prefixes(document, raw_lines, start_line_1)
             source = "\n".join(source_lines)
 
             search_pos = 0
@@ -109,6 +108,7 @@ This has `  spaces on both sides  ` in code.
                 if has_leading:
                     char_offset = content_start + padding_offset
                     line_num, column = _offset_to_position(source_lines, char_offset, start_line_1)
+                    column += len(prefixes[line_num - start_line_1])
                     violations.append(
                         Violation(
                             line=line_num,
@@ -124,6 +124,7 @@ This has `  spaces on both sides  ` in code.
                     trailing_spaces = len(effective) - len(effective.rstrip())
                     char_offset = content_start + padding_offset + len(effective) - trailing_spaces
                     line_num, column = _offset_to_position(source_lines, char_offset, start_line_1)
+                    column += len(prefixes[line_num - start_line_1])
                     violations.append(
                         Violation(
                             line=line_num,
@@ -148,7 +149,9 @@ This has `  spaces on both sides  ` in code.
 
             start_line_0 = token.map[0]
             end_line_0 = token.map[1] - 1
-            source_lines = lines[start_line_0 : end_line_0 + 1]
+            prefixes, source_lines = _strip_container_prefixes(
+                document, lines[start_line_0 : end_line_0 + 1], start_line_0 + 1
+            )
             source = "\n".join(source_lines)
 
             new_source = source
@@ -190,7 +193,8 @@ This has `  spaces on both sides  ` in code.
                 if not has_leading and not has_trailing:
                     continue
 
-                stripped = effective.strip()
+                # Line endings stay so that each line keeps its container prefix.
+                stripped = effective.strip(" \t")
                 if had_padding:
                     new_span = f"{markup} {stripped} {markup}"
                 else:
@@ -204,12 +208,32 @@ This has `  spaces on both sides  ` in code.
                 changed = True
 
             if new_source != source:
-                new_lines = new_source.split("\n")
+                new_lines = [
+                    prefix + line
+                    for prefix, line in zip(prefixes, new_source.split("\n"), strict=True)
+                ]
                 lines[start_line_0 : end_line_0 + 1] = new_lines
 
         if not changed:
             return None
         return "\n".join(lines)
+
+
+def _strip_container_prefixes(
+    document: Document, raw_lines: list[str], start_line_1: int
+) -> tuple[list[str], list[str]]:
+    """Split each line of an inline block into its container prefix and its content.
+
+    A code span that wraps inside a blockquote or list item would otherwise count the
+    ``> `` marker or indentation of its continuation line as span content.
+    """
+    prefixes: list[str] = []
+    contents: list[str] = []
+    for offset, line in enumerate(raw_lines):
+        prefix = document.container_prefix(start_line_1 + offset)
+        prefixes.append(prefix)
+        contents.append(line[len(prefix) :])
+    return prefixes, contents
 
 
 def _find_backtick_string(source: str, markup: str, start: int) -> int | None:

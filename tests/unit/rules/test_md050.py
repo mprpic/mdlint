@@ -163,7 +163,7 @@ Then uses **asterisks** later.
 
         assert len(violations) == 1
         assert violations[0].line == 2
-        assert violations[0].column == 11
+        assert violations[0].column == 13
 
     def test_strong_in_blockquote(self, rule: MD050, config: MD050Config) -> None:
         """Strong markers in blockquotes."""
@@ -185,7 +185,22 @@ Then uses **asterisks** later.
 
         assert len(violations) == 1
         assert violations[0].line == 1
-        assert violations[0].column == 14
+        assert violations[0].column == 16
+
+    def test_marker_positions_on_raw_lines(self, rule: MD050) -> None:
+        """Columns point at the marker in the raw line, past containers and code spans."""
+        content = load_fixture("md050", "marker_positions.md")
+        doc = Document(Path("test.md"), content)
+        config = MD050Config(style="asterisk")
+
+        violations = rule.check(doc, config)
+
+        assert sorted((v.line, v.column) for v in violations) == [
+            (3, 21),
+            (6, 3),
+            (8, 14),
+            (12, 13),
+        ]
 
 
 class TestMD050Fix:
@@ -286,3 +301,20 @@ class TestMD050Fix:
     def test_fixable_property(self, rule: MD050) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True
+
+    def test_fix_marker_positions_on_raw_lines(self, rule: MD050) -> None:
+        """Fix rewrites the markers themselves, not text at the inline-content offset."""
+        content = load_fixture("md050", "marker_positions.md")
+        doc = Document(Path("test.md"), content)
+        config = MD050Config(style="asterisk")
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        lines = result.splitlines()
+        assert lines[2] == "Call `__init__` and **bold**."
+        assert lines[5] == "- **strong**"
+        assert lines[7] == "> Quote with **strong**"
+        assert lines[11] == "| `__a__` | **a** |"
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None

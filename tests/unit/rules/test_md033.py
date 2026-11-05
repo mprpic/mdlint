@@ -284,3 +284,23 @@ Some text.
         assert "div" in violations[0].message
         assert violations[1].line == 6
         assert "br" in violations[1].message
+
+    def test_front_matter_ignored(self, rule: MD033, config: MD033Config) -> None:
+        """Front matter is metadata, not Markdown content, so tags in it are not flagged."""
+        content = load_fixture("md033", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert violations == []
+
+    def test_escaped_tag_ignored(self, rule: MD033, config: MD033Config) -> None:
+        """An escaped ``<`` is literal text; an escaped backslash before it is not."""
+        content = load_fixture("md033", "escaped.md")
+        doc = Document(Path("escaped.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (5, 24, "Element <span> is not allowed"),
+        ]

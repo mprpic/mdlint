@@ -37,7 +37,8 @@ class MD033(Rule[MD033Config]):
 
     description = (
         "This rule detects the use of raw HTML elements within Markdown content. "
-        "HTML elements in code blocks and HTML comments are not flagged."
+        "HTML elements in code blocks, HTML comments and front matter are not "
+        "flagged, nor are tags with an escaped `<` (`\\<div>`)."
     )
 
     rationale = (
@@ -135,8 +136,8 @@ Some text with <span>inline HTML</span> inside.
                     table_lines.add(line_num)
 
         for line_num, line in enumerate(document.lines, start=1):
-            # Skip lines in code blocks
-            if line_num in code_block_lines:
+            # Skip lines in code blocks and front matter
+            if line_num in code_block_lines or line_num in document.front_matter_lines:
                 continue
 
             # Find all HTML tags on the original line
@@ -158,6 +159,13 @@ Some text with <span>inline HTML</span> inside.
                 # Check if this match is inside an HTML comment
                 if column in comment_positions.get(line_num, set()):
                     continue
+
+                # An escaped "<" is literal text, except inside an HTML block where
+                # backslash escapes do not apply
+                if line_num not in document.html_block_lines:
+                    backslashes = match.start() - len(line[: match.start()].rstrip("\\"))
+                    if backslashes % 2:
+                        continue
 
                 violations.append(
                     Violation(

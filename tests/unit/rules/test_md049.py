@@ -174,6 +174,21 @@ class TestMD049:
 
         assert len(violations) == 0
 
+    def test_marker_positions_on_raw_lines(self, rule: MD049) -> None:
+        """Columns point at the marker in the raw line, past containers and code spans."""
+        content = load_fixture("md049", "marker_positions.md")
+        doc = Document(Path("test.md"), content)
+        config = MD049Config(style="asterisk")
+
+        violations = rule.check(doc, config)
+
+        assert sorted((v.line, v.column) for v in violations) == [
+            (4, 3),
+            (6, 14),
+            (8, 22),
+            (12, 11),
+        ]
+
 
 class TestMD049Fix:
     @pytest.fixture
@@ -286,3 +301,20 @@ class TestMD049Fix:
     def test_fixable_property(self, rule: MD049) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True
+
+    def test_fix_marker_positions_on_raw_lines(self, rule: MD049) -> None:
+        """Fix rewrites the markers themselves, not text at the inline-content offset."""
+        content = load_fixture("md049", "marker_positions.md")
+        doc = Document(Path("test.md"), content)
+        config = MD049Config(style="asterisk")
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        lines = result.splitlines()
+        assert lines[3] == "- *em*"
+        assert lines[5] == "> Quote with *em*"
+        assert lines[7] == "Use `snake_case` and *em*."
+        assert lines[11] == "| `_a_` | *a* |"
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None

@@ -270,3 +270,59 @@ class TestMD039:
         assert "[link text]" in result
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    def test_plain_brackets_before_link(self, rule: MD039, config: MD039Config) -> None:
+        """Bracketed text that is not a link is skipped when locating the link."""
+        content = load_fixture("md039", "plain_brackets_before_link.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [
+            (3, 16),
+            (3, 16),
+            (5, 27),
+            (5, 27),
+            (7, 29),
+            (7, 29),
+            (9, 5),
+            (9, 5),
+        ]
+
+    def test_shortcut_label_matched_by_case_folding(self, rule: MD039, config: MD039Config) -> None:
+        """A shortcut link whose label matches its definition only under case folding is checked."""
+        content = load_fixture("md039", "case_folded_label.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+        result = rule.fix(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [(3, 5), (3, 5)]
+        assert result is not None
+        assert result.splitlines()[2] == "See [Straße] for details."
+
+    def test_fix_plain_brackets_before_link(self, rule: MD039, config: MD039Config) -> None:
+        """Fix edits the link, not an earlier identical bracketed text."""
+        content = load_fixture("md039", "plain_brackets_before_link.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        lines = result.splitlines()
+        assert lines[2] == "Say [ hi ] and [hi](https://example.com/)."
+        assert lines[4] == "Code `[ hi ](x)` precedes [hi](https://example.com/)."
+        assert lines[6] == r"Escaped \[ hi ](x) precedes [hi](https://example.com/)."
+        assert lines[8] == "See [docs] for details."
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_multiline_link(self, rule: MD039, config: MD039Config) -> None:
+        """Fix strips spaces from link text that wraps across lines."""
+        content = load_fixture("md039", "invalid_multiline.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert rule.check(Document(Path("test.md"), result), config) == []
+        assert rule.fix(Document(Path("test.md"), result), config) is None

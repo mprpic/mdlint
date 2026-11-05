@@ -231,90 +231,25 @@ Regular text here.
 
         assert len(violations) == 0
 
-    def test_fix_corrects_invalid(self, rule: MD037, config: MD037Config) -> None:
-        """Fixing invalid content removes spaces inside emphasis markers."""
-        content = load_fixture("md037", "invalid.md")
+    def test_escaped_opening_marker_not_flagged(self, rule: MD037, config: MD037Config) -> None:
+        """An escaped opener is literal text, so it cannot pair with a later marker."""
+        content = load_fixture("md037", "escaped_markers.md")
         doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is not None
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
 
-    def test_fix_returns_none_for_valid(self, rule: MD037, config: MD037Config) -> None:
-        """Fixing already-valid content returns None."""
-        content = load_fixture("md037", "valid.md")
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is None
+        violations = rule.check(doc, config)
 
-    def test_fix_strips_leading_space(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips leading space from emphasis."""
-        content = "Text with ** bold** words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with **bold** words"
+        assert violations == []
 
-    def test_fix_strips_trailing_space(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips trailing space from emphasis."""
-        content = "Text with **bold ** words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with **bold** words"
+    def test_escaped_backslash_does_not_escape_marker(
+        self, rule: MD037, config: MD037Config
+    ) -> None:
+        """A marker after an escaped backslash is still a marker."""
+        doc = Document(Path("test.md"), r"A \\* x * b")
 
-    def test_fix_strips_both_sides(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips spaces on both sides of emphasis."""
-        content = "Text with ** bold ** words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with **bold** words"
+        violations = rule.check(doc, config)
 
-    def test_fix_single_asterisk_italic(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips spaces inside single asterisks."""
-        content = "Text with * italic * words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with *italic* words"
+        assert [v.column for v in violations] == [5, 9]
 
-    def test_fix_underscore_emphasis(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips spaces inside underscore emphasis."""
-        content = "Text with __ bold __ and _ italic _."
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with __bold__ and _italic_."
-
-    def test_fix_triple_asterisks(self, rule: MD037, config: MD037Config) -> None:
-        """Fix strips spaces inside triple asterisks."""
-        content = "Text with *** bold italic *** words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with ***bold italic*** words"
-
-    def test_fix_multiple_on_same_line(self, rule: MD037, config: MD037Config) -> None:
-        """Fix handles multiple violations on the same line."""
-        content = "Text with ** bold ** and * italic * words"
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result == "Text with **bold** and *italic* words"
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
-
-    def test_fix_preserves_code_blocks(self, rule: MD037, config: MD037Config) -> None:
-        """Fix does not modify content inside code blocks."""
-        content = """\
-# Heading
-
-```
-This ** is not ** emphasis in a code block
-```
-
-Regular text here.
-"""
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is None
-
-    def test_fix_empty_document(self, rule: MD037, config: MD037Config) -> None:
-        """Fix returns None for empty document."""
-        doc = Document(Path("empty.md"), "")
-        result = rule.fix(doc, config)
-        assert result is None
+    def test_not_fixable(self, rule: MD037) -> None:
+        """Spaced asterisks are often literal (math, footnote markers), so nothing is rewritten."""
+        assert rule.fixable is False
