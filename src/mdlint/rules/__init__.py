@@ -59,7 +59,7 @@ from mdlint.rules.md058 import MD058
 from mdlint.rules.md059 import MD059
 from mdlint.rules.md060 import MD060
 
-__all__ = ["RULE_REGISTRY"]
+__all__ = ["RULE_REGISTRY", "resolve_rule_id"]
 
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "MD001": MD001,
@@ -116,3 +116,21 @@ RULE_REGISTRY: dict[str, type[Rule]] = {
     "MD059": MD059,
     "MD060": MD060,
 }
+
+_RULE_LOOKUP: dict[str, str] = {
+    key.lower(): rule_id
+    for rule_id, rule_class in RULE_REGISTRY.items()
+    for key in (rule_id, rule_class.name)
+}
+
+
+def resolve_rule_id(name: str) -> str | None:
+    """Map a rule reference written by a user to its canonical ID.
+
+    Rules can be referenced by ID or name, in any case, from CLI flags, config files and
+    inline directives; one lookup keeps all of those entry points consistent.
+
+    Returns:
+        The rule ID (e.g. ``"MD013"``), or None if no rule matches.
+    """
+    return _RULE_LOOKUP.get(name.strip().lower())
