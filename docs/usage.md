@@ -192,7 +192,15 @@ This long line (if it were long enough) will not trigger MD013.
 <!-- mdlint: enable -->
 ```
 
-Unknown rule IDs are silently ignored.
+Rules can be referenced by ID or by name, in any case, and separated by spaces, commas, or both. For example, `MD013`,
+`md013` and `line-length` all refer to the same rule:
+
+```markdown
+<!-- mdlint: disable no-inline-html, MD013 -->
+```
+
+Unknown rule IDs and names are silently ignored; the remaining rules in the directive still apply. A directive that
+names only unknown rules has no effect.
 
 You can selectively re-enable specific rules after a disable comment:
 
@@ -209,7 +217,6 @@ Suppress one or more rules for just the line immediately following the comment:
 
 ```markdown
 <!-- mdlint: disable-next-line MD001 -->
-
 ### This heading won't trigger MD001
 ```
 

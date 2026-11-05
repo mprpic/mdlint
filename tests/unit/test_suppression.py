@@ -101,6 +101,54 @@ class TestParseDirectives:
         assert len(directives) == 1
         assert directives[0].rule_ids == ["MD001"]
 
+    def test_rule_name(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable no-inline-html -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD033"]
+
+    def test_lowercase_id(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable md033 -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD033"]
+
+    def test_comma_separated(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable MD033, MD013 -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD033", "MD013"]
+
+    def test_comma_separated_without_spaces(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable-next-line MD033,MD013 -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD033", "MD013"]
+
+    def test_mixed_separators_and_forms(self) -> None:
+        doc = _make_doc("<!-- mdlint: enable md001, line-length MD033 -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD001", "MD013", "MD033"]
+
+    def test_unknown_name_dropped(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable MD999 no-inline-html -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 1
+        assert directives[0].rule_ids == ["MD033"]
+
+    def test_only_unknown_names_not_blanket(self) -> None:
+        doc = _make_doc("<!-- mdlint: disable MD999 no-such-rule -->\n")
+        directives = _parse_directives(doc)
+
+        assert len(directives) == 0
+
 
 class TestIsSuppressed:
     """Tests for _is_suppressed."""
@@ -245,6 +293,23 @@ class TestFilterSuppressed:
 
         assert len(result) == 1
         assert result[0].rule_id == "MD001"
+
+    def test_disable_by_rule_name(self) -> None:
+        doc = _make_doc("# T\n\n<!-- mdlint: disable no-inline-html -->\n<b>x</b>\n")
+        violations = [_make_violation(4, "MD033"), _make_violation(4, "MD013")]
+
+        result = filter_suppressed(doc, violations)
+
+        assert len(result) == 1
+        assert result[0].rule_id == "MD013"
+
+    def test_unknown_name_does_not_disable_all(self) -> None:
+        doc = _make_doc("# T\n\n<!-- mdlint: disable MD999 -->\n<b>x</b>\n")
+        violations = [_make_violation(4, "MD033")]
+
+        result = filter_suppressed(doc, violations)
+
+        assert result == violations
 
     def test_empty_violations(self) -> None:
         doc = _make_doc("<!-- mdlint: disable -->\n# Heading\n")

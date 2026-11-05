@@ -2,10 +2,11 @@ import re
 from dataclasses import dataclass
 
 from mdlint.document import Document
+from mdlint.rules import resolve_rule_id
 from mdlint.violation import Violation
 
 DIRECTIVE_PATTERN = re.compile(
-    r"^\s*<!--\s*mdlint:\s*(disable|enable|disable-next-line)(?:\s+([\w\s]+?))?\s*-->\s*$"
+    r"^\s*<!--\s*mdlint:\s*(disable|enable|disable-next-line)(?:\s+([\w\s,-]+?))?\s*-->\s*$"
 )
 
 
@@ -29,7 +30,11 @@ def _parse_directives(document: Document) -> list[Directive]:
         match = DIRECTIVE_PATTERN.match(line)
         if match:
             kind = match.group(1)
-            rule_ids = match.group(2).split() if match.group(2) else []
+            names = (match.group(2) or "").replace(",", " ").split()
+            rule_ids = [rule_id for name in names if (rule_id := resolve_rule_id(name))]
+            # A directive that only names unknown rules must not widen into "all rules".
+            if names and not rule_ids:
+                continue
             directives.append(Directive(line=line_num, kind=kind, rule_ids=rule_ids))
 
     return directives
