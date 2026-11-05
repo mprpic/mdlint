@@ -401,6 +401,18 @@ class TestMD003Fix:
         assert [v.line for v in rule.check(fixed_doc, config)] == [5, 9, 11]
         assert rule.fix(fixed_doc, config) is None
 
+    def test_fix_atx_to_setext_declines_block_start_text(self, rule: MD003) -> None:
+        """Heading text that would start a list, quote, fence or other block is kept as ATX."""
+        config = MD003Config(style="setext")
+        content = load_fixture("md003", "atx_to_setext_block_start.md")
+        doc = Document(Path("test.md"), content)
+        assert [v.line for v in rule.check(doc, config)] == [4, 6, 8, 10, 12, 14, 16, 18]
+        result = rule.fix(doc, config)
+        assert result == content.replace("## Plain text\n", "Plain text\n----------\n")
+        fixed_doc = Document(Path("test.md"), result)
+        assert [v.line for v in rule.check(fixed_doc, config)] == [4, 6, 8, 10, 12, 14, 16]
+        assert rule.fix(fixed_doc, config) is None
+
     def test_fixable_property(self, rule: MD003) -> None:
         """Rule should report as fixable."""
         assert rule.fixable is True

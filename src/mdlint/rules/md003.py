@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from mdlint.document import Document
@@ -138,11 +139,23 @@ Mixed heading styles in the same document.
 
         return violations
 
+    @staticmethod
+    def _reads_as_setext(text: str, level: int) -> bool:
+        """Whether `text` over a setext underline parses back as the same heading."""
+        underline = ("=" if level == 1 else "-") * len(text)
+        tokens = Document(Path("<heading>"), f"{text}\n{underline}\n").tokens
+        return (
+            [token.type for token in tokens] == ["heading_open", "inline", "heading_close"]
+            and tokens[0].tag == f"h{level}"
+            and tokens[1].content == text
+        )
+
     def fix(self, document: Document, config: MD003Config) -> str | None:
         """Fix heading style violations by converting headings to the expected style.
 
         A heading directly after paragraph or table text is left as is when it would become
-        setext, because its text line would be absorbed into the block above.
+        setext, because its text line would be absorbed into the block above. So is one whose
+        text would start a block of its own, such as ``- item`` turning into a list item.
         """
         style = config.style
         expected_style: str | None = None if style == "consistent" else style
@@ -184,10 +197,14 @@ Mixed heading styles in the same document.
                 effective_expected = expected_style
 
             if current_style != effective_expected:
-                # Setext can't express h3+, an empty heading, or a heading whose text
-                # line would continue the paragraph or table above it.
+                # Setext can't express h3+, an empty heading, a heading whose text line
+                # would continue the paragraph or table above it, or text that would
+                # start another kind of block.
                 if effective_expected == "setext" and (
-                    level > 2 or not text or line_0 in absorbing_lines
+                    level > 2
+                    or not text
+                    or line_0 in absorbing_lines
+                    or not self._reads_as_setext(text, level)
                 ):
                     continue
                 fixes.append((line_0, end_0, level, current_style, effective_expected, text))
