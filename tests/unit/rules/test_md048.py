@@ -7,6 +7,23 @@ from mdlint.rules.md048 import MD048, MD048Config
 from tests.conftest import load_fixture
 
 
+def apply_fix(rule: MD048, content: str, config: MD048Config) -> str:
+    result = rule.fix(Document(Path("test.md"), content), config)
+    return content if result is None else result
+
+
+def fence_contents(content: str) -> list[str]:
+    return [t.content for t in Document(Path("test.md"), content).tokens if t.type == "fence"]
+
+
+def assert_safe_fix(rule: MD048, content: str, config: MD048Config) -> str:
+    """Fix the content, checking the code survives intact and a second fix changes nothing."""
+    fixed = apply_fix(rule, content, config)
+    assert fence_contents(fixed) == fence_contents(content)
+    assert apply_fix(rule, fixed, config) == fixed
+    return fixed
+
+
 class TestMD048:
     @pytest.fixture
     def rule(self) -> MD048:
@@ -214,3 +231,35 @@ class TestMD048:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_fix_lengthens_fence_around_backtick_lines(
+        self, rule: MD048, config: MD048Config
+    ) -> None:
+        """A backtick fence line inside the code would close a same-length new fence."""
+        content = load_fixture("md048", "tilde_with_backticks.md")
+        result = assert_safe_fix(rule, content, config)
+        assert "\n````markdown\n```\ninner\n```\n````\n" in result
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_blockquote_fence(self, rule: MD048, config: MD048Config) -> None:
+        """Fences inside blockquotes are converted with their markers kept."""
+        content = load_fixture("md048", "blockquote_fence.md")
+        result = assert_safe_fix(rule, content, config)
+        assert "\n> ```\n> y\n> ```\n" in result
+        assert "\n  > ```\n  > z\n  > ```\n" in result
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_closing_fence_edge_cases(self, rule: MD048, config: MD048Config) -> None:
+        """Longer closing fences are converted whole, and unclosed fences only at the top."""
+        content = load_fixture("md048", "closing_fence_edge_cases.md")
+        result = assert_safe_fix(rule, content, config)
+        assert "\n```\nlonger closing fence\n`````\n" in result
+        assert result.endswith("\n````\nunclosed fence\n```\n")
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_declines_backtick_in_info_string(self, rule: MD048, config: MD048Config) -> None:
+        """A backtick fence's info string cannot contain backticks, so the fence is kept."""
+        content = load_fixture("md048", "backtick_info_string.md")
+        doc = Document(Path("test.md"), content)
+        assert len(rule.check(doc, config)) == 1
+        assert rule.fix(doc, config) is None

@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -138,7 +139,10 @@ echo "Hello"
         return violations
 
     def fix(self, document: Document, config: MD048Config) -> str | None:
-        """Fix code fence style by converting all fences to the expected style."""
+        """Fix code fence style by converting all fences to the expected style.
+
+        A fence is left as it is when a backtick fence cannot carry its info string.
+        """
         violations = self.check(document, config)
         if not violations:
             return None
@@ -147,27 +151,59 @@ echo "Hello"
         assert expected_char is not None
 
         violation_lines = {v.line for v in violations}
+        closing_line = re.compile(rf"[ \t]*({re.escape(expected_char)}+)[ \t]*")
 
         lines = document.content.split("\n")
         for token in document.tokens:
             if token.type != "fence" or not token.map or not token.markup:
                 continue
 
-            opening_line = token.map[0] + 1
-            if opening_line not in violation_lines:
+            start, end = token.map
+            if start + 1 not in violation_lines:
                 continue
+            if expected_char == "`" and "`" in token.info:
+                continue  # a backtick fence's info string cannot contain backticks
 
-            fence_length = len(token.markup)
-            old_char = token.markup[0]
-            old_fence = old_char * fence_length
-            new_fence = expected_char * fence_length
+            code_lines = token.content.removesuffix("\n").split("\n") if token.content else []
+            # A code line made of the new fence character would close a fence no longer than it.
+            runs = [len(m.group(1)) for line in code_lines if (m := closing_line.fullmatch(line))]
+            length = max([len(token.markup)] + [run + 1 for run in runs])
 
-            # Replace opening and closing fence lines
-            for line_idx in (token.map[0], token.map[1] - 1):
-                line = lines[line_idx]
-                stripped = line.lstrip()
-                indent = line[: len(line) - len(stripped)]
-                if stripped.startswith(old_fence):
-                    lines[line_idx] = indent + new_fence + stripped[fence_length:]
+            fence_lines = [start]
+            if end - start - 1 > len(code_lines):
+                fence_lines.append(end - 1)  # the fence is closed
 
-        return "\n".join(lines)
+            # Both fence lines change together, or the block would lose its closing fence.
+            new_lines = []
+            for index in fence_lines:
+                prefix_length = len(document.container_prefix(index + 1))
+                new_line = self._replace_fence(
+                    lines[index], prefix_length, token.markup, expected_char * length
+                )
+                if new_line is None:
+                    break
+                new_lines.append(new_line)
+            else:
+                for index, new_line in zip(fence_lines, new_lines, strict=True):
+                    lines[index] = new_line
+
+        result = "\n".join(lines)
+        if result == document.content:
+            return None
+        return result
+
+    @staticmethod
+    def _replace_fence(line: str, prefix_length: int, markup: str, new_fence: str) -> str | None:
+        """Swap the fence run on a line for `new_fence`, or return None if it is not found.
+
+        A closing run longer than `new_fence` keeps its length so it still closes the block.
+        """
+        start = prefix_length
+        while start < len(line) and line[start] in " \t":
+            start += 1
+        end = start
+        while end < len(line) and line[end] == markup[0]:
+            end += 1
+        if end - start < len(markup):
+            return None
+        return line[:start] + new_fence[0] * max(len(new_fence), end - start) + line[end:]
