@@ -17,7 +17,7 @@ from mdlint.output.json import format_json
 from mdlint.output.terminal import print_results
 from mdlint.rules import RULE_REGISTRY, resolve_rule_id
 
-# Width for rule documentation output and help output
+# Maximum width of rule documentation and help output; narrower terminals use their own width
 RULE_DOC_WIDTH = 120
 HELP_CONFIG_WIDTH = 120
 RULE_DOC_INDENT = 2
@@ -29,7 +29,7 @@ CONTEXT_SETTINGS = {
 
 @click.group(context_settings=CONTEXT_SETTINGS)
 @click.rich_config(
-    help_config=click.RichHelpConfiguration(text_markup="markdown", width=HELP_CONFIG_WIDTH)
+    help_config=click.RichHelpConfiguration(text_markup="markdown", max_width=HELP_CONFIG_WIDTH)
 )
 @click.version_option(version=__version__, prog_name="mdlint")
 def cli() -> None:
@@ -55,7 +55,7 @@ def cli() -> None:
                 },
             ],
         },
-        width=HELP_CONFIG_WIDTH,
+        max_width=HELP_CONFIG_WIDTH,
     )
 )
 @click.argument("paths", nargs=-1, type=click.Path())
@@ -269,7 +269,8 @@ def rule(rule_id: str | None, show_examples: bool) -> None:
     If RULE_ID is provided, shows detailed documentation for that rule.
     Otherwise, lists all available rules.
     """
-    console = Console(width=RULE_DOC_WIDTH)
+    console = Console()
+    console.width = min(console.width, RULE_DOC_WIDTH)
 
     if rule_id is None:
         # List all rules
@@ -332,7 +333,7 @@ def rule(rule_id: str | None, show_examples: bool) -> None:
     if not show_examples:
         return
 
-    panel_width = RULE_DOC_WIDTH - RULE_DOC_INDENT
+    panel_width = console.width - RULE_DOC_INDENT
     panels = []
 
     if rule_class.example_invalid:

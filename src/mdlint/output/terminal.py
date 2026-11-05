@@ -59,7 +59,9 @@ def print_results(
         show_context: Whether to show surrounding lines for each violation.
     """
     if console is None:
-        console = Console()
+        # Each line is a record people grep and click through to; let the terminal wrap it
+        # instead of Rich breaking long paths and messages across lines.
+        console = Console(soft_wrap=True)
 
     max_lc_width = 0
     for f in result.files:

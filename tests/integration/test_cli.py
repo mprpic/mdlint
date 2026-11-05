@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from mdlint.cli import cli
-from tests.conftest import fixture_path
+from tests.conftest import fixture_path, load_fixture
 
 
 class TestCLICheck:
@@ -792,3 +792,47 @@ class TestCLIRule:
         assert "atx_closed" in result.output
         assert "setext" in result.output
         assert "consistent" in result.output
+
+
+class TestCLIOutputWidth:
+    """Integration tests for how output adapts to the terminal width."""
+
+    @pytest.fixture(autouse=True)
+    def _no_project_config(self, monkeypatch) -> None:
+        """Prevent tests from picking up the project's .mdlint.toml."""
+        monkeypatch.setattr("mdlint.config.find_config_file", lambda start_dir=None: None)
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["--help"],
+            ["check", "--help"],
+            ["rule", "--help"],
+            ["check", "--no-such-option"],
+            ["rule", "MD001", "--show-examples"],
+        ],
+    )
+    @pytest.mark.parametrize(("columns", "expected_width"), [(60, 60), (200, 120)])
+    def test_boxed_output_fits_terminal_up_to_max_width(
+        self, args: list[str], columns: int, expected_width: int
+    ) -> None:
+        """Help, usage errors and rule docs fit narrow terminals but stop at 120 columns."""
+        runner = CliRunner(env={"COLUMNS": str(columns)})
+
+        result = runner.invoke(cli, args)
+
+        assert max(len(line) for line in result.output.splitlines()) == expected_width
+
+    def test_check_results_never_wrapped(self, tmp_path) -> None:
+        """Each result stays on one line, so long paths survive narrow terminals and pipes."""
+        test_file = tmp_path / ("a-long-directory-name-" * 3) / "document.md"
+        test_file.parent.mkdir()
+        test_file.write_text(load_fixture("cli", "with_violations.md"))
+        runner = CliRunner(env={"COLUMNS": "40"})
+
+        result = runner.invoke(cli, ["check", str(test_file)])
+
+        lines = result.output.splitlines()
+        assert f"{test_file} (2)" in lines
+        assert "6:1  MD004  List marker style: expected dash, found asterisk" in lines
+        assert "✘ Found 2 violations in 1 file (1 file checked)" in lines
