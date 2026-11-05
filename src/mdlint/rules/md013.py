@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass, field
 
 from mdlint.document import Document
@@ -16,16 +15,22 @@ class MD013Config(RuleConfig):
             "description": "Maximum allowed line length. Set to 0 to disable.",
         },
     )
-    heading_line_length: int = field(
-        default=80,
+    heading_line_length: int | None = field(
+        default=None,
         metadata={
-            "description": "Maximum line length for headings. Set to 0 to disable.",
+            "description": (
+                "Maximum line length for headings. Defaults to `line_length` when "
+                "not set. Set to 0 to disable."
+            ),
         },
     )
-    code_block_line_length: int = field(
-        default=80,
+    code_block_line_length: int | None = field(
+        default=None,
         metadata={
-            "description": "Maximum line length for code blocks. Set to 0 to disable.",
+            "description": (
+                "Maximum line length for code blocks. Defaults to `line_length` "
+                "when not set. Set to 0 to disable."
+            ),
         },
     )
     code_blocks: bool = field(
@@ -65,12 +70,13 @@ class MD013(Rule[MD013Config]):
     description = (
         "This rule detects lines that exceed the configured maximum length "
         "(default: 80 characters). Separate limits can be set for headings "
-        "(`heading_line_length`) and code blocks (`code_block_line_length`). "
+        "(`heading_line_length`) and code blocks (`code_block_line_length`); "
+        "both fall back to `line_length` when not set. "
         "By default, lines are allowed to exceed the limit if the only content "
         "pushing the line over is a trailing unbreakable token (e.g. a long "
-        "URL). Set `strict` to `true` to flag all lines exceeding the limit. "
-        "Lines containing only links/images and reference definitions are "
-        "always exempt."
+        "URL), and lines containing only links/images are exempt. Set `strict` "
+        "to `true` to flag all lines exceeding the limit. Reference definitions "
+        "outside code blocks are always exempt, and front matter is not checked."
     )
 
     rationale = (
@@ -109,23 +115,31 @@ Another paragraph with a line that is also way too long and should be flagged by
         table_lines = self._get_table_lines(document)
         ref_def_lines = self._get_reference_definition_lines(document)
         link_only_lines = self._get_link_only_lines(document)
+        front_matter_lines = document.front_matter_lines
+
+        heading_line_length = config.heading_line_length
+        if heading_line_length is None:
+            heading_line_length = config.line_length
+        code_block_line_length = config.code_block_line_length
+        if code_block_line_length is None:
+            code_block_line_length = config.line_length
 
         for line_num, line in enumerate(document.lines, start=1):
             line_length = len(line)
 
-            # Reference definitions are always exempt (even in strict mode)
-            if line_num in ref_def_lines:
+            # Reference definitions and front matter are always exempt (even in strict mode)
+            if line_num in ref_def_lines or line_num in front_matter_lines:
                 continue
 
             # Determine the applicable max length based on content type
             if line_num in code_block_lines:
                 if not config.code_blocks:
                     continue
-                max_length = config.code_block_line_length
+                max_length = code_block_line_length
             elif line_num in heading_lines:
                 if not config.headings:
                     continue
-                max_length = config.heading_line_length
+                max_length = heading_line_length
             elif line_num in table_lines:
                 if not config.tables:
                     continue
@@ -192,10 +206,17 @@ Another paragraph with a line that is also way too long and should be flagged by
 
     @staticmethod
     def _get_reference_definition_lines(document: Document) -> set[int]:
-        """Get line numbers that are reference definitions."""
+        """Get line numbers that are reference definitions.
+
+        Code block lines are skipped because definition syntax there is just code and must
+        stay subject to `code_blocks` and `code_block_line_length`.
+        """
         ref_lines: set[int] = set()
+        code_block_lines = document.code_block_lines
 
         for line_num, line in enumerate(document.lines, start=1):
+            if line_num in code_block_lines:
+                continue
             if Document.REFERENCE_DEF_PATTERN.match(line):
                 ref_lines.add(line_num)
 
@@ -274,6 +295,14 @@ Another paragraph with a line that is also way too long and should be flagged by
         (the last run of non-whitespace characters) brings the line within
         the limit. This allows long URLs and other unbreakable content to
         exceed the limit when they are the only reason the line is too long.
+
+        The token is found by scanning back from the end, because a regex anchored at the end
+        of the line backtracks through every suffix of a long token and runs in quadratic time.
         """
-        effective_line = re.sub(r"\S+$", "#", line)
-        return len(effective_line) <= max_length
+        start = len(line)
+        if start and not line[-1].isspace():
+            while start > 0 and not line[start - 1].isspace():
+                start -= 1
+            # The token counts as a single character
+            return start + 1 <= max_length
+        return len(line) <= max_length

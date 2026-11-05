@@ -7,6 +7,14 @@ from mdlint.rules.md009 import MD009, MD009Config
 from tests.conftest import load_fixture
 
 
+def _fix_twice(rule: MD009, config: MD009Config, content: str) -> str:
+    """Apply the fix and check that a second pass changes nothing."""
+    result = rule.fix(Document(Path("test.md"), content), config)
+    assert result is not None
+    assert rule.fix(Document(Path("test.md"), result), config) is None
+    return result
+
+
 class TestMD009:
     @pytest.fixture
     def rule(self) -> MD009:
@@ -175,8 +183,18 @@ class TestMD009:
         assert len(violations) == 1
         assert violations[0].line == 2
 
-    def test_code_blocks_checked_by_default(self, rule: MD009, config: MD009Config) -> None:
-        """Code blocks are checked for trailing spaces by default."""
+    def test_code_blocks_ignored_by_default(self, rule: MD009, config: MD009Config) -> None:
+        """Code blocks are ignored by default."""
+        content = load_fixture("md009", "code_block.md")
+        doc = Document(Path("code_block.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_code_blocks_checked_when_configured(self, rule: MD009) -> None:
+        """Code blocks are checked when code_blocks=True."""
+        config = MD009Config(code_blocks=True)
         content = load_fixture("md009", "code_block.md")
         doc = Document(Path("code_block.md"), content)
 
@@ -185,19 +203,8 @@ class TestMD009:
         assert len(violations) == 1
         assert violations[0].rule_id == "MD009"
 
-    def test_code_blocks_ignored_when_configured(self, rule: MD009) -> None:
-        """Code blocks are ignored when code_blocks=False."""
-        config = MD009Config(code_blocks=False)
-        content = load_fixture("md009", "code_block.md")
-        doc = Document(Path("code_block.md"), content)
-
-        violations = rule.check(doc, config)
-
-        assert len(violations) == 0
-
-    def test_indented_code_block_ignored(self, rule: MD009) -> None:
-        """Indented code blocks are ignored when code_blocks=False."""
-        config = MD009Config(code_blocks=False)
+    def test_indented_code_block_ignored_by_default(self, rule: MD009, config: MD009Config) -> None:
+        """Indented code blocks are ignored by default."""
         content = "# Heading\n\n    code with trailing spaces   \n\nEnd.\n"
         doc = Document(Path("test.md"), content)
 
@@ -205,14 +212,42 @@ class TestMD009:
 
         assert len(violations) == 0
 
-    def test_indented_code_block_checked_by_default(self, rule: MD009, config: MD009Config) -> None:
-        """Indented code blocks are checked by default."""
+    def test_indented_code_block_checked_when_configured(self, rule: MD009) -> None:
+        """Indented code blocks are checked when code_blocks=True."""
+        config = MD009Config(code_blocks=True)
         content = "# Heading\n\n    code with trailing spaces   \n\nEnd.\n"
         doc = Document(Path("test.md"), content)
 
         violations = rule.check(doc, config)
 
         assert len(violations) == 1
+
+    def test_multiline_code_span_ignored_by_default(self, rule: MD009, config: MD009Config) -> None:
+        """Trailing whitespace inside a multi-line code span is code content."""
+        content = load_fixture("md009", "code_span_multiline.md")
+        doc = Document(Path("code_span_multiline.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [6]
+
+    def test_multiline_code_span_checked_when_configured(self, rule: MD009) -> None:
+        """Code spans are checked when code_blocks=True."""
+        config = MD009Config(code_blocks=True)
+        content = load_fixture("md009", "code_span_multiline.md")
+        doc = Document(Path("code_span_multiline.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [3, 6]
+
+    def test_front_matter_ignored(self, rule: MD009) -> None:
+        """Front matter is never checked, whatever code_blocks is set to."""
+        content = load_fixture("md009", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+
+        assert rule.check(doc, MD009Config()) == []
+        assert rule.check(doc, MD009Config(code_blocks=True)) == []
 
 
 class TestMD009Fix:
@@ -272,22 +307,38 @@ class TestMD009Fix:
         assert result is not None
         assert result == "Line with tab\n"
 
-    def test_fix_code_blocks_by_default(self, rule: MD009, config: MD009Config) -> None:
-        """Fix removes trailing spaces in code blocks by default."""
+    def test_fix_code_blocks_when_configured(self, rule: MD009) -> None:
+        """Fix removes trailing spaces in code blocks when code_blocks=True."""
+        config = MD009Config(code_blocks=True)
         content = load_fixture("md009", "code_block.md")
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is not None
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        result = _fix_twice(rule, config, content)
+        assert "x = 1\n" in result
 
-    def test_fix_skips_code_blocks_when_configured(self, rule: MD009) -> None:
-        """Fix skips code blocks when code_blocks=False."""
-        config = MD009Config(code_blocks=False)
+    def test_fix_skips_code_blocks_by_default(self, rule: MD009, config: MD009Config) -> None:
+        """Fix leaves code blocks alone by default."""
         content = load_fixture("md009", "code_block.md")
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_fix_keeps_multiline_code_span_content(self, rule: MD009, config: MD009Config) -> None:
+        """Fix leaves whitespace inside a multi-line code span untouched by default."""
+        content = load_fixture("md009", "code_span_multiline.md")
+        result = _fix_twice(rule, config, content)
+        assert result == content.replace("span.   \n", "span.\n")
+
+    def test_fix_multiline_code_span_when_configured(self, rule: MD009) -> None:
+        """Fix strips code span whitespace when code_blocks=True."""
+        config = MD009Config(code_blocks=True)
+        content = load_fixture("md009", "code_span_multiline.md")
+        result = _fix_twice(rule, config, content)
+        assert result == content.replace("make   \n", "make\n").replace("span.   \n", "span.\n")
+
+    def test_fix_skips_front_matter(self, rule: MD009, config: MD009Config) -> None:
+        """Fix never rewrites front matter."""
+        content = load_fixture("md009", "front_matter.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
 
     def test_fix_br_spaces_zero(self, rule: MD009) -> None:
         """Fix removes all trailing spaces when br_spaces=0."""

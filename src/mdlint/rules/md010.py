@@ -4,19 +4,22 @@ from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
+# CommonMark expands tabs to multiples of 4 columns when measuring indentation
+_TAB_SIZE = 4
+
 
 @dataclass
 class MD010Config(RuleConfig):
     """Configuration for MD010 rule."""
 
     code_blocks: bool = field(
-        default=True,
+        default=False,
         metadata={
             "description": (
                 "Whether to check code blocks and inline code spans for hard tabs. "
-                "When True (default), code blocks and inline code spans are checked. "
-                "When False, fenced code blocks, indented code blocks, and inline "
-                "code spans are ignored."
+                "When False (default), fenced code blocks, indented code blocks, and "
+                "inline code spans are ignored, since some languages (such as "
+                "Makefiles) require tabs. When True, they are checked and fixed."
             ),
         },
     )
@@ -32,7 +35,12 @@ class MD010(Rule[MD010Config]):
 
     description = (
         "This rule detects hard tab characters in Markdown files. It "
-        "triggers on any lines that contain tab characters."
+        "triggers on any lines that contain tab characters. Code blocks and "
+        "inline code spans are skipped unless `code_blocks` is enabled, and "
+        "front matter is never checked. The fix expands each tab to the next "
+        "4-column tab stop, so content stays on the same column, and removes "
+        "trailing whitespace that contains a tab instead of turning it into "
+        "spaces, which would create a hard line break."
     )
 
     rationale = (
@@ -51,10 +59,11 @@ class MD010(Rule[MD010Config]):
         if not config.code_blocks:
             code_block_lines = document.code_block_lines
             code_span_positions = document.code_span_positions
+        front_matter_lines = document.front_matter_lines
 
         results: list[tuple[int, list[int]]] = []
         for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
+            if line_num in code_block_lines or line_num in front_matter_lines:
                 continue
 
             if "\t" not in line:
@@ -94,23 +103,39 @@ class MD010(Rule[MD010Config]):
         return violations
 
     def fix(self, document: Document, config: MD010Config) -> str | None:
-        """Fix hard tabs by replacing them with spaces."""
+        """Fix hard tabs by expanding them to spaces.
+
+        Tabs are padded to the next tab stop rather than replaced by a fixed number of
+        spaces, so text after a tab (such as list item content) keeps its column and its
+        Markdown meaning. Tabs left alone (in code spans) still occupy their original
+        width, so later tabs on the line are measured against the original layout.
+        """
         tab_positions = self._get_tab_positions(document, config)
         if not tab_positions:
             return None
 
-        tab_columns_by_line = {line_num: set(columns) for line_num, columns in tab_positions}
         lines = document.content.split("\n")
-        for line_num, tab_columns in tab_columns_by_line.items():
+        for line_num, columns in tab_positions:
+            tab_columns = set(columns)
             line = lines[line_num - 1]
-            new_line = []
-            column = 0
-            for char in line:
-                column += 1
-                if char == "\t" and column in tab_columns:
-                    new_line.append("    ")
+            body = line.rstrip(" \t")
+            if max(tab_columns) > len(body):
+                # Expanded trailing tabs would become trailing spaces, i.e. a hard break, so
+                # they are dropped. Two or more spaces after the last tab already form one,
+                # and are kept.
+                trailing = line[len(body) :]
+                spaces = trailing[trailing.rfind("\t") + 1 :]
+                line = body + (spaces if len(spaces) >= 2 else "")
+            new_line: list[str] = []
+            width = 0
+            for column, char in enumerate(line, start=1):
+                if char == "\t":
+                    tab_stop = width + _TAB_SIZE - width % _TAB_SIZE
+                    new_line.append(" " * (tab_stop - width) if column in tab_columns else char)
+                    width = tab_stop
                 else:
                     new_line.append(char)
+                    width += 1
             lines[line_num - 1] = "".join(new_line)
 
         return "\n".join(lines)

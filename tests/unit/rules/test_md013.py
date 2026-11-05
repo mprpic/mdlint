@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -177,13 +178,54 @@ class TestMD013:
         assert len(violations) == 1
         assert violations[0].line == 9
 
+    def test_heading_line_length_follows_line_length(self, rule: MD013) -> None:
+        """Headings use line_length when heading_line_length is not set."""
+        content = load_fixture("md013", "headings.md")
+        doc = Document(Path("headings.md"), content)
+        config = MD013Config(line_length=120)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_heading_line_length_overrides_line_length(self, rule: MD013) -> None:
+        """An explicit heading_line_length still applies when line_length is raised."""
+        content = load_fixture("md013", "headings.md")
+        doc = Document(Path("headings.md"), content)
+        config = MD013Config(line_length=120, heading_line_length=80)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [1, 5]
+        assert violations[0].message == "Expected max 80 characters, found 89"
+
+    def test_code_block_line_length_follows_line_length(self, rule: MD013) -> None:
+        """Code blocks use line_length when code_block_line_length is not set."""
+        content = load_fixture("md013", "code_block.md")
+        doc = Document(Path("code_block.md"), content)
+        config = MD013Config(line_length=120)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_code_block_line_length_overrides_line_length(self, rule: MD013) -> None:
+        """An explicit code_block_line_length still applies when line_length is raised."""
+        content = load_fixture("md013", "code_block.md")
+        doc = Document(Path("code_block.md"), content)
+        config = MD013Config(line_length=120, code_block_line_length=80)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [7]
+
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = MD013Config()
 
         assert config.line_length == 80
-        assert config.heading_line_length == 80
-        assert config.code_block_line_length == 80
+        assert config.heading_line_length is None
+        assert config.code_block_line_length is None
         assert config.code_blocks is True
         assert config.tables is True
         assert config.headings is True
@@ -254,6 +296,36 @@ class TestMD013:
 
         assert len(violations) == 0
 
+    def test_reference_definitions_in_code_blocks_checked(self, rule: MD013) -> None:
+        """Reference-definition syntax inside a code block is code, not a definition."""
+        content = load_fixture("md013", "reference_def_in_code_block.md")
+        doc = Document(Path("reference_def_in_code_block.md"), content)
+        config = MD013Config(strict=True)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [4]
+
+    def test_reference_definitions_in_code_blocks_ignored(self, rule: MD013) -> None:
+        """Code block lines are still skipped when code_blocks=False."""
+        content = load_fixture("md013", "reference_def_in_code_block.md")
+        doc = Document(Path("reference_def_in_code_block.md"), content)
+        config = MD013Config(strict=True, code_blocks=False)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_front_matter_ignored(self, rule: MD013) -> None:
+        """Front matter lines are not checked, even in strict mode."""
+        content = load_fixture("md013", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+        config = MD013Config(strict=True)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_link_only_lines_exempted(self, rule: MD013, config: MD013Config) -> None:
         """Test that lines containing only links/images are exempt."""
         content = load_fixture("md013", "link_only.md")
@@ -265,3 +337,25 @@ class TestMD013:
         # Line 3 (text with link) is flagged
         assert len(violations) == 1
         assert violations[0].line == 3
+
+    def test_link_only_lines_flagged_in_strict_mode(self, rule: MD013) -> None:
+        """The link-only exemption does not apply in strict mode."""
+        content = load_fixture("md013", "link_only.md")
+        doc = Document(Path("link_only.md"), content)
+        config = MD013Config(strict=True)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [1, 3, 5]
+
+    def test_long_trailing_token_is_linear(self, rule: MD013, config: MD013Config) -> None:
+        """A huge token followed by a word is checked in linear time."""
+        content = f"# T\n\n![x](data:image/png;base64,{'A' * 40000}) caption\n"
+        doc = Document(Path("test.md"), content)
+
+        start = time.perf_counter()
+        violations = rule.check(doc, config)
+        elapsed = time.perf_counter() - start
+
+        assert [v.line for v in violations] == [3]
+        assert elapsed < 0.5

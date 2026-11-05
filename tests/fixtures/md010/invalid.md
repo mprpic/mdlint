@@ -2,6 +2,7 @@
 
 This document uses hard tabs.
 
-	* hard tab character used to indent
+* Item
+	* Nested item indented with a hard tab
 
 Some text	with a tab in the middle.

@@ -7,6 +7,14 @@ from mdlint.rules.md010 import MD010, MD010Config
 from tests.conftest import load_fixture
 
 
+def _fix_twice(rule: MD010, config: MD010Config, content: str) -> str:
+    """Apply the fix and check that a second pass changes nothing."""
+    result = rule.fix(Document(Path("test.md"), content), config)
+    assert result is not None
+    assert rule.fix(Document(Path("test.md"), result), config) is None
+    return result
+
+
 class TestMD010:
     @pytest.fixture
     def rule(self) -> MD010:
@@ -46,8 +54,18 @@ class TestMD010:
 
         assert len(violations) == 0
 
-    def test_code_blocks_checked_by_default(self, rule: MD010, config: MD010Config) -> None:
-        """Code blocks are checked for tabs by default."""
+    def test_code_blocks_ignored_by_default(self, rule: MD010, config: MD010Config) -> None:
+        """Code blocks are ignored by default."""
+        content = load_fixture("md010", "code_block.md")
+        doc = Document(Path("code_block.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
+    def test_code_blocks_checked_when_configured(self, rule: MD010) -> None:
+        """Code blocks are checked when code_blocks=True."""
+        config = MD010Config(code_blocks=True)
         content = load_fixture("md010", "code_block.md")
         doc = Document(Path("code_block.md"), content)
 
@@ -55,16 +73,6 @@ class TestMD010:
 
         assert len(violations) == 1
         assert violations[0].rule_id == "MD010"
-
-    def test_code_blocks_ignored_when_configured(self, rule: MD010) -> None:
-        """Code blocks are ignored when code_blocks=False."""
-        config = MD010Config(code_blocks=False)
-        content = load_fixture("md010", "code_block.md")
-        doc = Document(Path("code_block.md"), content)
-
-        violations = rule.check(doc, config)
-
-        assert len(violations) == 0
 
     def test_column_position_reported(self, rule: MD010, config: MD010Config) -> None:
         """Tab position is correctly reported as column number."""
@@ -79,17 +87,18 @@ class TestMD010:
 
     def test_multiple_tabs_on_same_line(self, rule: MD010, config: MD010Config) -> None:
         """Multiple tabs on the same line are reported separately."""
-        content = "\tFirst\tSecond"
+        content = "A\tFirst\tSecond"
         doc = Document(Path("test.md"), content)
 
         violations = rule.check(doc, config)
 
         assert len(violations) == 2
-        assert violations[0].column == 1
-        assert violations[1].column == 7
+        assert violations[0].column == 2
+        assert violations[1].column == 8
 
-    def test_inline_code_checked_by_default(self, rule: MD010, config: MD010Config) -> None:
-        """Inline code spans are checked for tabs by default."""
+    def test_inline_code_checked_when_configured(self, rule: MD010) -> None:
+        """Inline code spans are checked when code_blocks=True."""
+        config = MD010Config(code_blocks=True)
         content = load_fixture("md010", "inline_code.md")
         doc = Document(Path("inline_code.md"), content)
 
@@ -97,9 +106,8 @@ class TestMD010:
 
         assert len(violations) == 2
 
-    def test_inline_code_ignored_when_code_blocks_false(self, rule: MD010) -> None:
-        """Inline code spans are ignored when code_blocks=False."""
-        config = MD010Config(code_blocks=False)
+    def test_inline_code_ignored_by_default(self, rule: MD010, config: MD010Config) -> None:
+        """Inline code spans are ignored by default."""
         content = load_fixture("md010", "inline_code.md")
         doc = Document(Path("inline_code.md"), content)
 
@@ -108,15 +116,22 @@ class TestMD010:
         assert len(violations) == 1
         assert violations[0].column == 26  # Tab outside the code span
 
-    def test_indented_code_block_ignored_when_configured(self, rule: MD010) -> None:
-        """Indented code blocks are ignored when code_blocks=False."""
-        config = MD010Config(code_blocks=False)
+    def test_indented_code_block_ignored_by_default(self, rule: MD010, config: MD010Config) -> None:
+        """Indented code blocks are ignored by default."""
         content = load_fixture("md010", "indented_code_block.md")
         doc = Document(Path("indented_code_block.md"), content)
 
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_front_matter_ignored(self, rule: MD010) -> None:
+        """Front matter is never checked, whatever code_blocks is set to."""
+        content = load_fixture("md010", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+
+        assert rule.check(doc, MD010Config()) == []
+        assert rule.check(doc, MD010Config(code_blocks=True)) == []
 
     def test_empty_document(self, rule: MD010, config: MD010Config) -> None:
         """Empty document has no violations."""
@@ -160,56 +175,70 @@ class TestMD010Fix:
         result = rule.fix(doc, config)
         assert result is None
 
-    def test_fix_replaces_tab_with_four_spaces(self, rule: MD010, config: MD010Config) -> None:
-        """Fix replaces each tab with four spaces."""
+    def test_fix_expands_tab_to_next_tab_stop(self, rule: MD010, config: MD010Config) -> None:
+        """A tab at column 4 reaches the next stop at column 8."""
         content = "Text\twith tab"
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result == "Text    with tab"
 
     def test_fix_multiple_tabs_on_same_line(self, rule: MD010, config: MD010Config) -> None:
-        """Fix replaces multiple tabs on the same line."""
-        content = "\tFirst\tSecond"
+        """Each tab is padded to its own tab stop."""
+        content = "A\tFirst\tSecond"
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
-        assert result == "    First    Second"
+        assert result == "A   First   Second"
 
-    def test_fix_code_block_tabs_by_default(self, rule: MD010, config: MD010Config) -> None:
-        """Fix replaces tabs in code blocks by default."""
+    def test_fix_keeps_content_columns(self, rule: MD010, config: MD010Config) -> None:
+        """Expanding to tab stops keeps list content and text on the same columns."""
+        content = load_fixture("md010", "tab_stops.md")
+        result = _fix_twice(rule, config, content)
+        assert result == "# Tab Stops\n\n-   item\n    continuation\n\nAb  c   d\n"
+
+    def test_fix_removes_trailing_tabs(self, rule: MD010, config: MD010Config) -> None:
+        """Trailing whitespace containing a tab is removed rather than becoming a hard break."""
+        content = load_fixture("md010", "trailing_tabs.md")
+        result = _fix_twice(rule, config, content)
+        assert result == "# Trailing Tabs\n\ntext\nnext line\n\nmixed\nend\n"
+
+    def test_fix_keeps_hard_break_after_tab(self, rule: MD010, config: MD010Config) -> None:
+        """Two or more spaces after a trailing tab are a hard break, and the fix keeps them."""
+        content = load_fixture("md010", "trailing_tab_hard_break.md")
+        result = _fix_twice(rule, config, content)
+        assert result == "# Hard Break\n\nbreak  \nnext line\n\nno break\nend\n"
+
+    def test_fix_skips_front_matter(self, rule: MD010, config: MD010Config) -> None:
+        """Fix never rewrites front matter."""
+        content = load_fixture("md010", "front_matter.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_code_block_tabs_when_configured(self, rule: MD010) -> None:
+        """Fix replaces tabs in code blocks when code_blocks=True."""
+        config = MD010Config(code_blocks=True)
         content = load_fixture("md010", "code_block.md")
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is not None
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        result = _fix_twice(rule, config, content)
+        assert '    return "world"' in result
 
-    def test_fix_skips_code_blocks_when_configured(self, rule: MD010) -> None:
-        """Fix skips code blocks when code_blocks=False."""
-        config = MD010Config(code_blocks=False)
+    def test_fix_skips_code_blocks_by_default(self, rule: MD010, config: MD010Config) -> None:
+        """Fix leaves code blocks alone by default."""
         content = load_fixture("md010", "code_block.md")
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
 
-    def test_fix_inline_code_tabs_by_default(self, rule: MD010, config: MD010Config) -> None:
-        """Fix replaces tabs in inline code spans by default."""
+    def test_fix_inline_code_tabs_when_configured(self, rule: MD010) -> None:
+        """Fix replaces tabs in inline code spans when code_blocks=True."""
+        config = MD010Config(code_blocks=True)
         content = load_fixture("md010", "inline_code.md")
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is not None
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        result = _fix_twice(rule, config, content)
+        assert result == "# Inline code with tabs\n\nSome `code  here` and text  with tab.\n"
 
-    def test_fix_skips_inline_code_when_configured(self, rule: MD010) -> None:
-        """Fix skips inline code tabs but fixes others when code_blocks=False."""
-        config = MD010Config(code_blocks=False)
+    def test_fix_skips_inline_code_by_default(self, rule: MD010, config: MD010Config) -> None:
+        """Fix keeps the code span tab and pads the later tab to the original tab stop."""
         content = load_fixture("md010", "inline_code.md")
-        doc = Document(Path("test.md"), content)
-        result = rule.fix(doc, config)
-        assert result is not None
-        # Should still fix the tab outside the code span
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        result = _fix_twice(rule, config, content)
+        assert result == "# Inline code with tabs\n\nSome `code\there` and text  with tab.\n"
 
     def test_fix_empty_document(self, rule: MD010, config: MD010Config) -> None:
         """Fix returns None for empty document."""

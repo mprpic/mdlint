@@ -62,12 +62,7 @@ Some more text here.
 
     def _get_excluded_lines(self, document: Document) -> set[int]:
         """Get line numbers inside code blocks or front matter."""
-        excluded = document.code_block_lines
-        for token in document.tokens:
-            if token.type == "front_matter" and token.map:
-                for ln in range(token.map[0] + 1, token.map[1] + 1):
-                    excluded.add(ln)
-        return excluded
+        return document.code_block_lines | document.front_matter_lines
 
     def check(self, document: Document, config: MD012Config) -> list[Violation]:
         """Check for multiple consecutive blank lines."""

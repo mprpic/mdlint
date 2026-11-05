@@ -21,13 +21,15 @@ class MD009Config(RuleConfig):
         },
     )
     code_blocks: bool = field(
-        default=True,
+        default=False,
         metadata={
             "description": (
-                "Whether to check code blocks for trailing spaces. When True "
-                "(default), code blocks are checked. When False, fenced and "
-                "indented code blocks are ignored, since some programming "
-                "languages require trailing whitespace."
+                "Whether to check code blocks and inline code spans for trailing "
+                "spaces. When False (default), fenced code blocks, indented code "
+                "blocks, and whitespace inside inline code spans that wrap onto "
+                "the next line are ignored, since that whitespace is code content "
+                "and some programming languages require it. When True, they are "
+                "checked and fixed like any other line."
             ),
         },
     )
@@ -44,7 +46,9 @@ class MD009(Rule[MD009Config]):
     description = (
         "This rule detects trailing whitespace at the end of lines. It "
         "triggers on any lines that end with unexpected whitespace, with "
-        "exceptions for intentional line breaks (typically 2 spaces)."
+        "exceptions for intentional line breaks (typically 2 spaces). Code "
+        "blocks and inline code spans are skipped unless `code_blocks` is "
+        "enabled, and front matter is never checked."
     )
 
     rationale = (
@@ -71,18 +75,25 @@ class MD009(Rule[MD009Config]):
         br_spaces = config.br_spaces
 
         code_block_lines: set[int] = set()
+        code_span_positions: dict[int, set[int]] = {}
         if not config.code_blocks:
             code_block_lines = document.code_block_lines
+            code_span_positions = document.code_span_positions
+        front_matter_lines = document.front_matter_lines
 
         results: list[tuple[int, str, int]] = []
         for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
+            if line_num in code_block_lines or line_num in front_matter_lines:
                 continue
 
             stripped = line.rstrip()
             trailing_count = len(line) - len(stripped)
 
             if trailing_count == 0:
+                continue
+
+            # The whitespace belongs to a code span that continues on the next line
+            if len(stripped) + 1 in code_span_positions.get(line_num, set()):
                 continue
 
             if not self._is_valid_hard_break(br_spaces, trailing_count, stripped):

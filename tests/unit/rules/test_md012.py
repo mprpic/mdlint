@@ -168,6 +168,17 @@ class TestMD012:
 
         assert len(violations) == 0
 
+    def test_front_matter_does_not_leak_into_code_block_lines(
+        self, rule: MD012, config: MD012Config
+    ) -> None:
+        """Excluding front matter must not mutate the document's cached code block lines."""
+        content = load_fixture("md012", "front_matter.md")
+        doc = Document(Path("front_matter.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+        assert doc.code_block_lines == set()
+
     def test_html_comment_with_blank_lines(self, rule: MD012, config: MD012Config) -> None:
         """Multiple blank lines inside HTML comments trigger violations."""
         content = "# Heading\n\n<!-- comment\n\n\nend -->\n\nText\n"
