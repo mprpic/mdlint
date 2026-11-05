@@ -11,11 +11,11 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from mdlint import __version__
-from mdlint.config import apply_cli_overrides, load_config
+from mdlint.config import ConfigError, apply_cli_overrides, load_config, resolve_rule_names
 from mdlint.linter import Linter, LintResult, discover_files
 from mdlint.output.json import format_json
 from mdlint.output.terminal import print_results
-from mdlint.rules import RULE_REGISTRY
+from mdlint.rules import RULE_REGISTRY, resolve_rule_id
 
 # Width for rule documentation output and help output
 RULE_DOC_WIDTH = 120
@@ -161,22 +161,19 @@ def check(
     PATHS can be files or directories. Use '-' for stdin. If no paths provided, lints current
     directory.
     """
-    # Validate CLI options - check for unknown rules
-    all_rules = set(select) | set(ignore) | set(extend_select) | set(extend_ignore)
-    unknown = all_rules - set(RULE_REGISTRY.keys())
-    if unknown:
-        rules = ", ".join(sorted(unknown))
-        click.echo(f"Error: Unknown rule(s): {rules}", err=True)
+    try:
+        # Validate every rule flag at once so all unknown names are reported together
+        resolve_rule_names(sorted({*select, *ignore, *extend_select, *extend_ignore}))
+        config = load_config(config_path=config_path)
+    except ConfigError as e:
+        click.echo(f"Error: {e}", err=True)
         sys.exit(2)
-
-    # Load configuration
-    config = load_config(config_path=config_path)
     config = apply_cli_overrides(
         config,
-        select=select,
-        ignore=ignore,
-        extend_select=extend_select,
-        extend_ignore=extend_ignore,
+        select=tuple(resolve_rule_names(select)),
+        ignore=tuple(resolve_rule_names(ignore)),
+        extend_select=tuple(resolve_rule_names(extend_select)),
+        extend_ignore=tuple(resolve_rule_names(extend_ignore)),
     )
 
     if verbose and config.source:
@@ -192,10 +189,16 @@ def check(
 
     # Handle stdin
     if len(paths) == 1 and paths[0] == "-":
-        content = sys.stdin.read()
+        try:
+            content = sys.stdin.buffer.read().decode("utf-8")
+        except UnicodeDecodeError as e:
+            click.echo(f"Error: <stdin>: {e}", err=True)
+            sys.exit(2)
         if fix:
             file_result, fixed_content = linter.fix_stdin(content)
-            click.echo(fixed_content, nl=False)
+            # Written as bytes: fix_stdin already restored the input's line endings, and a
+            # text-mode stdout (as on Windows) would translate them a second time.
+            click.echo(fixed_content.encode("utf-8"), nl=False)
             sys.exit(1 if file_result.violations else 0)
         file_result = linter.lint_stdin(content)
         result = LintResult(files=[file_result])
@@ -275,18 +278,10 @@ def rule(rule_id: str | None, show_examples: bool) -> None:
             console.print(f"  [yellow]{rid}[/yellow]  {rule_class.name:20}  {rule_class.summary}")
         raise SystemExit(0)  # ty doesn't recognize sys.exit(0) as terminating function
 
-    # Resolve partial rule ID to full ID
-    # Accept numeric input (e.g., "1" -> "MD001") or MD-prefixed (case-insensitive)
-    if rule_id.isdigit():
-        resolved_id = f"MD{int(rule_id):03d}"
-    elif rule_id.upper().startswith("MD"):
-        resolved_id = rule_id.upper()
-    else:
-        click.echo(f"Error: Invalid rule ID '{rule_id}'", err=True)
-        sys.exit(2)
-
-    if resolved_id not in RULE_REGISTRY:
-        click.echo(f"Error: Unknown rule '{resolved_id}'", err=True)
+    # Accept numeric input (e.g., "1" -> "MD001"), or a rule ID or name in any case
+    resolved_id = resolve_rule_id(f"MD{int(rule_id):03d}" if rule_id.isdigit() else rule_id)
+    if resolved_id is None:
+        click.echo(f"Error: Unknown rule '{rule_id}'", err=True)
         sys.exit(2)
 
     rule_class = RULE_REGISTRY[resolved_id]

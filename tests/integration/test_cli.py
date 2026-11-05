@@ -1,4 +1,6 @@
+import io
 import json
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -528,6 +530,172 @@ class TestCLICheckWithConfig:
         assert "MD001" not in result.output
 
 
+class TestCLIConfigErrors:
+    """Invalid configuration exits 2 with a one-line message instead of a traceback."""
+
+    @pytest.mark.parametrize(
+        ("toml", "message"),
+        [
+            ("[rules.MD013]\nstern = true\n", "rules.MD013.stern: Unknown option"),
+            ("[rules.MD013]\nline-length = 100\n", "did you mean line_length?"),
+            ("[rules]\nMD013 = false\n", "rules.MD013: Expected a table of options"),
+            ("[rules.MD022]\nlines_above = [1,2,1,1,1,1]\n", "Expected an integer"),
+            (
+                '[rules.MD033]\nallowed_elements = "br, img"\n',
+                'write it as allowed_elements = ["br", "img"]',
+            ),
+            ('[rules.MD029]\nstyle = "one-or-ordered"\n', "rules.MD029.style: Expected one of"),
+            ('[rules.MD060]\nstyle = "aligned-no-space"\n', "rules.MD060.style: Expected one of"),
+            ("[rules.MD999]\nfoo = 1\n", "rules.MD999: Unknown rule"),
+            ('select = ["line-lenght"]\n', "select: Unknown rule(s): line-lenght"),
+            ("[rules.MD013\n", "Invalid TOML"),
+        ],
+    )
+    def test_config_file_error(self, tmp_path, toml: str, message: str) -> None:
+        runner = CliRunner()
+        config = tmp_path / ".mdlint.toml"
+        config.write_text(toml)
+        path = fixture_path("cli", "clean.md")
+
+        result = runner.invoke(cli, ["check", "--config", str(config), str(path)])
+
+        assert result.exit_code == 2
+        assert result.output.startswith(f"Error: {config}: ")
+        assert message in result.output
+        assert len(result.output.splitlines()) == 1
+
+    def test_discovered_config_error(self, tmp_path, monkeypatch) -> None:
+        """Errors in an automatically discovered config file are reported the same way."""
+        runner = CliRunner()
+        (tmp_path / ".mdlint.toml").write_text("[rules.MD013]\nstern = true\n")
+        monkeypatch.chdir(tmp_path)
+        path = fixture_path("cli", "clean.md")
+
+        result = runner.invoke(cli, ["check", str(path)])
+
+        assert result.exit_code == 2
+        assert "rules.MD013.stern: Unknown option" in result.output
+
+    def test_inline_config_error(self) -> None:
+        runner = CliRunner()
+        path = fixture_path("cli", "clean.md")
+
+        result = runner.invoke(cli, ["check", "--config", "MD013.line_length=[", str(path)])
+
+        assert result.exit_code == 2
+        assert result.output.startswith("Error: <inline>: Invalid TOML")
+
+    def test_missing_config_file(self) -> None:
+        """A --config value without '=' that is not a file is a missing file, not inline TOML."""
+        runner = CliRunner()
+        path = fixture_path("cli", "clean.md")
+
+        result = runner.invoke(cli, ["check", "--config", "missing.toml", str(path)])
+
+        assert result.exit_code == 2
+        assert result.output == "Error: Config file not found: missing.toml\n"
+
+    def test_inline_config_still_applies(self) -> None:
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["check", "--config", "MD013.line_length=10", "-"],
+            input="# T\n\nA long paragraph of text.\n",
+        )
+
+        assert result.exit_code == 1
+        assert "MD013" in result.output
+
+
+class TestCLIRuleNames:
+    """Rules can be referred to by ID or name, in any case."""
+
+    @pytest.fixture(autouse=True)
+    def _no_project_config(self, monkeypatch) -> None:
+        monkeypatch.setattr("mdlint.config.find_config_file", lambda start_dir=None: None)
+
+    @pytest.mark.parametrize("flag", ["--select", "--extend-select"])
+    @pytest.mark.parametrize("name", ["heading-increment", "md001", "HEADING-INCREMENT"])
+    def test_select_by_name(self, flag: str, name: str) -> None:
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["check", flag, name, "-"], input="## H2\n\n#### H4\n")
+
+        assert result.exit_code == 1
+        assert "MD001" in result.output
+
+    @pytest.mark.parametrize("flag", ["--ignore", "--extend-ignore"])
+    def test_ignore_by_name(self, flag: str) -> None:
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["check", "--select", "MD001", flag, "heading-increment", "-"],
+            input="# H1\n\n### H3\n",
+        )
+
+        assert result.exit_code == 0
+
+    def test_config_select_by_name(self, tmp_path) -> None:
+        runner = CliRunner()
+        config = tmp_path / ".mdlint.toml"
+        config.write_text('select = ["line-length"]\n\n[rules.line-length]\nline_length = 10\n')
+
+        result = runner.invoke(
+            cli, ["check", "--config", str(config), "-"], input="# T\n\nA long paragraph of text.\n"
+        )
+
+        assert result.exit_code == 1
+        assert "MD013" in result.output
+
+    def test_config_rule_section_lowercase(self, tmp_path) -> None:
+        runner = CliRunner()
+        config = tmp_path / ".mdlint.toml"
+        config.write_text("[rules.md013]\nline_length = 10\n")
+
+        result = runner.invoke(
+            cli, ["check", "--config", str(config), "-"], input="# T\n\nA long paragraph of text.\n"
+        )
+
+        assert result.exit_code == 1
+        assert "MD013" in result.output
+
+
+class TestCLIStdin:
+    """Tests for reading content from stdin."""
+
+    @pytest.fixture(autouse=True)
+    def _no_project_config(self, monkeypatch) -> None:
+        monkeypatch.setattr("mdlint.config.find_config_file", lambda start_dir=None: None)
+
+    @pytest.mark.parametrize("fix", [False, True])
+    def test_invalid_utf8(self, fix: bool) -> None:
+        runner = CliRunner()
+        args = ["check", "--fix", "-"] if fix else ["check", "-"]
+
+        result = runner.invoke(cli, args, input=b"# Title\n\ncaf\xe9\n")
+
+        assert result.exit_code == 2
+        assert result.output.startswith("Error: <stdin>: ")
+        assert len(result.output.splitlines()) == 1
+
+    def test_fix_keeps_crlf_when_stdout_translates_newlines(self, monkeypatch) -> None:
+        """Fixed output is written as bytes, so a text-mode stdout cannot double the CRs."""
+        content = fixture_path("cli", "clean.md").read_bytes().replace(b"\n", b"\r\n")
+        output = io.BytesIO()
+        # Text-mode stdout on Windows writes every "\n" as "\r\n".
+        stdout = io.TextIOWrapper(output, encoding="utf-8", newline="\r\n", write_through=True)
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(content), encoding="utf-8"))
+        monkeypatch.setattr(sys, "stdout", stdout)
+
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["check", "--fix", "-"])
+
+        assert exit_info.value.code == 0
+        assert output.getvalue() == content
+
+
 class TestCLIRule:
     """Integration tests for mdlint rule command."""
 
@@ -580,14 +748,24 @@ class TestCLIRule:
         assert result.exit_code == 2
         assert "Unknown rule" in result.output
 
-    def test_rule_invalid_format(self) -> None:
-        """Error for invalid rule ID format."""
+    def test_rule_unknown_name(self) -> None:
+        """Error for a name that matches no rule ID or name."""
         runner = CliRunner()
 
         result = runner.invoke(cli, ["rule", "foobar"])
 
         assert result.exit_code == 2
-        assert "Invalid rule ID" in result.output
+        assert "Unknown rule 'foobar'" in result.output
+
+    @pytest.mark.parametrize("name", ["line-length", "Line-Length"])
+    def test_rule_by_name(self, name: str) -> None:
+        """Show documentation for a rule looked up by name."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["rule", name])
+
+        assert result.exit_code == 0
+        assert "MD013: line-length" in result.output
 
     def test_rule_with_parameters(self) -> None:
         """Show rule with configurable parameters."""

@@ -1,14 +1,126 @@
+import dataclasses
+import json
+import re
 import sys
+import types
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib  # type: ignore[import-not-found]
 
-from mdlint.rules import RULE_REGISTRY
+from mdlint.rules import RULE_REGISTRY, resolve_rule_id
 from mdlint.rules.base import RuleConfig
+
+_TYPE_NAMES: dict[Any, str] = {bool: "boolean", int: "integer", str: "string"}
+
+
+class ConfigError(Exception):
+    """Invalid configuration.
+
+    Raised instead of letting bad values reach rule code, where they would either crash
+    with a traceback or silently change what a rule checks.
+    """
+
+
+def _toml_value(value: Any) -> str:
+    """Render a parsed value close to how it was written in TOML, for error messages."""
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _describe(hint: Any) -> str:
+    """Describe a type hint in the words used for config error messages."""
+    origin = get_origin(hint)
+    args = get_args(hint)
+    if origin is Literal:
+        return "one of " + ", ".join(_toml_value(arg) for arg in args)
+    if origin in (Union, types.UnionType):
+        return " or ".join(_describe(arg) for arg in args if arg is not type(None))
+    if origin is list:
+        return f"a list of {_TYPE_NAMES.get(args[0], args[0].__name__)}s"
+    name = _TYPE_NAMES.get(hint, getattr(hint, "__name__", str(hint)))
+    return f"an {name}" if name[0] in "aeiou" else f"a {name}"
+
+
+def _matches(value: Any, hint: Any) -> bool:
+    """Check a parsed TOML value against a config field's type hint."""
+    origin = get_origin(hint)
+    args = get_args(hint)
+    if origin is Literal:
+        return any(type(value) is type(arg) and value == arg for arg in args)
+    if origin in (Union, types.UnionType):
+        return any(_matches(value, arg) for arg in args)
+    if origin is list:
+        return isinstance(value, list) and all(_matches(item, args[0]) for item in value)
+    if hint is int:
+        # TOML booleans are Python bools, which are also ints
+        return isinstance(value, int) and not isinstance(value, bool)
+    expected = origin or hint
+    if isinstance(expected, type):
+        return isinstance(value, expected)
+    return True
+
+
+def _type_error(key: str, value: Any, hint: Any) -> ConfigError:
+    """Build the error for a value of the wrong type.
+
+    A comma-separated string for a list option is a likely mistake, so the message shows
+    the list it was probably meant to be.
+    """
+    message = f"{key}: Expected {_describe(hint)}, got {_toml_value(value)}"
+    accepts_list = any(get_origin(arg) is list for arg in (hint, *get_args(hint)))
+    if accepts_list and isinstance(value, str):
+        items = [item.strip() for item in value.split(",") if item.strip()]
+        message += f"; write it as {key.rsplit('.', 1)[-1]} = {_toml_value(items)}"
+    return ConfigError(message)
+
+
+def _build_rule_config(rule_id: str, key: str, options: Any) -> RuleConfig:
+    """Validate one `[rules.<key>]` table against the rule's config dataclass."""
+    if not isinstance(options, dict):
+        raise ConfigError(f"{key}: Expected a table of options, got {_toml_value(options)}")
+    config_class = RULE_REGISTRY[rule_id].config_class
+    hints = get_type_hints(config_class)
+    fields = {f.name: f for f in dataclasses.fields(config_class)}
+    field_names = fields.keys()
+    for name, value in options.items():
+        if name not in field_names:
+            message = f"{key}.{name}: Unknown option"
+            if name.replace("-", "_") in field_names:
+                message += f" (did you mean {name.replace('-', '_')}?)"
+            raise ConfigError(message)
+        if not _matches(value, hints[name]):
+            raise _type_error(f"{key}.{name}", value, hints[name])
+        if fields[name].metadata.get("regex"):
+            try:
+                re.compile(value)
+            except re.error as e:
+                raise ConfigError(f"{key}.{name}: Invalid regular expression: {e}") from None
+    return config_class(**options)
+
+
+def resolve_rule_names(names: Iterable[str]) -> list[str]:
+    """Map rule names written by a user to rule IDs.
+
+    Raises:
+        ConfigError: If any name matches no rule; every unknown name is listed so the user
+            can fix them all at once.
+    """
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for name in names:
+        rule_id = resolve_rule_id(name)
+        if rule_id is None:
+            unknown.append(name)
+        else:
+            resolved.append(rule_id)
+    if unknown:
+        raise ConfigError(f"Unknown rule(s): {', '.join(unknown)}")
+    return resolved
 
 
 @dataclass
@@ -137,12 +249,46 @@ def build_rule_configs(config_data: dict) -> dict[str, RuleConfig]:
 
     Returns:
         Mapping of rule ID to RuleConfig.
+
+    Raises:
+        ConfigError: If a rule section names no rule, configures a rule twice, or holds an
+            unknown option or a value of the wrong type.
     """
     rules_data = config_data.get("rules", {})
-    return {
-        rule_id: rule_class.config_class(**rules_data.get(rule_id, {}))
-        for rule_id, rule_class in RULE_REGISTRY.items()
+    if not isinstance(rules_data, dict):
+        raise ConfigError(f"rules: Expected a table, got {_toml_value(rules_data)}")
+
+    rule_configs = {
+        rule_id: rule_class.config_class() for rule_id, rule_class in RULE_REGISTRY.items()
     }
+    # Sections may use a rule name or any case, so track the key each rule ID came from
+    configured_keys: dict[str, str] = {}
+    for key, options in rules_data.items():
+        rule_id = resolve_rule_id(key)
+        if rule_id is None:
+            raise ConfigError(f"rules.{key}: Unknown rule")
+        if rule_id in configured_keys:
+            raise ConfigError(f"rules.{key}: Duplicates rules.{configured_keys[rule_id]}")
+        configured_keys[rule_id] = key
+        rule_configs[rule_id] = _build_rule_config(rule_id, f"rules.{key}", options)
+    return rule_configs
+
+
+def _string_list(config_data: dict, key: str) -> list[str]:
+    """Validate a top-level list option such as `exclude`."""
+    value = config_data.get(key, [])
+    if not _matches(value, list[str]):
+        raise _type_error(key, value, list[str])
+    return value
+
+
+def _rule_list(config_data: dict, key: str) -> list[str]:
+    """Validate `select`/`ignore` the same way as the CLI flags, mapping names to rule IDs."""
+    names = _string_list(config_data, key)
+    try:
+        return resolve_rule_names(names)
+    except ConfigError as e:
+        raise ConfigError(f"{key}: {e}") from None
 
 
 def load_config(config_path: str | None = None) -> Configuration:
@@ -153,32 +299,42 @@ def load_config(config_path: str | None = None) -> Configuration:
 
     Returns:
         Merged Configuration object.
+
+    Raises:
+        ConfigError: If the config file is missing, is not valid TOML, or holds invalid
+            settings. The message names the config source.
     """
     config_data: dict = {}
     source: str | None = None
 
     if config_path:
-        path = Path(config_path)
-        if path.is_file():
-            config_data = parse_toml_file(path)
-            source = str(path)
-        else:
+        if Path(config_path).is_file():
+            source = str(Path(config_path))
+        elif "=" in config_path:
             # Treat as inline TOML
-            config_data = parse_inline_config(config_path)
             source = "<inline>"
+        else:
+            raise ConfigError(f"Config file not found: {config_path}")
     else:
         # Search for config file
         found_path = find_config_file()
         if found_path:
-            config_data = parse_toml_file(found_path)
             source = str(found_path)
 
-    rule_configs = build_rule_configs(config_data)
+    try:
+        if source == "<inline>":
+            config_data = parse_inline_config(config_path or "")
+        elif source:
+            config_data = parse_toml_file(Path(source))
 
-    # Extract select/ignore/exclude lists
-    select = config_data.get("select", [])
-    ignore = config_data.get("ignore", [])
-    exclude = config_data.get("exclude", [])
+        rule_configs = build_rule_configs(config_data)
+        select = _rule_list(config_data, "select")
+        ignore = _rule_list(config_data, "ignore")
+        exclude = _string_list(config_data, "exclude")
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{source}: Invalid TOML: {e}") from None
+    except ConfigError as e:
+        raise ConfigError(f"{source}: {e}") from None
 
     return Configuration(
         rules=rule_configs,

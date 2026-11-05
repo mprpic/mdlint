@@ -1,9 +1,11 @@
+import re
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from mdlint.config import (
+    ConfigError,
     Configuration,
     apply_cli_overrides,
     build_rule_configs,
@@ -11,6 +13,7 @@ from mdlint.config import (
     load_config,
     parse_inline_config,
     parse_toml_file,
+    resolve_rule_names,
 )
 from tests.conftest import fixture_path
 
@@ -187,6 +190,191 @@ class TestBuildRuleConfigs:
 
         assert len(result) == len(RULE_REGISTRY)
 
+    def test_rule_section_by_name(self) -> None:
+        """A rule section may be named by rule name instead of ID."""
+        result = build_rule_configs({"rules": {"line-length": {"line_length": 100}}})
+
+        assert result["MD013"].line_length == 100  # type: ignore[attr-defined]
+
+    def test_rule_section_lowercase_id(self) -> None:
+        """A rule section ID is matched case-insensitively."""
+        result = build_rule_configs({"rules": {"md013": {"line_length": 5}}})
+
+        assert result["MD013"].line_length == 5  # type: ignore[attr-defined]
+
+    def test_optional_fields_accept_values(self) -> None:
+        """Options typed `X | None` accept a value of type X."""
+        result = build_rule_configs(
+            {
+                "rules": {
+                    "MD007": {"start_indent": 4},
+                    "MD033": {"table_allowed_elements": ["br"]},
+                }
+            }
+        )
+
+        assert result["MD007"].start_indent == 4  # type: ignore[attr-defined]
+        assert result["MD033"].table_allowed_elements == ["br"]  # type: ignore[attr-defined]
+
+
+class TestBuildRuleConfigsErrors:
+    """Invalid rule configuration raises ConfigError naming the rule and key."""
+
+    @pytest.mark.parametrize(
+        ("rules", "message"),
+        [
+            ({"MD013": {"stern": True}}, "rules.MD013.stern: Unknown option"),
+            (
+                {"MD013": {"line-length": 100}},
+                "rules.MD013.line-length: Unknown option (did you mean line_length?)",
+            ),
+            ({"MD013": False}, "rules.MD013: Expected a table of options, got false"),
+            (
+                {"MD022": {"lines_above": [1, 2, 1, 1, 1, 1]}},
+                "rules.MD022.lines_above: Expected an integer, got [1, 2, 1, 1, 1, 1]",
+            ),
+            (
+                {"MD013": {"line_length": True}},
+                "rules.MD013.line_length: Expected an integer, got true",
+            ),
+            (
+                {"MD013": {"code_blocks": "no"}},
+                'rules.MD013.code_blocks: Expected a boolean, got "no"',
+            ),
+            (
+                {"MD033": {"allowed_elements": ["br", 1]}},
+                'rules.MD033.allowed_elements: Expected a list of strings, got ["br", 1]',
+            ),
+            (
+                {"MD029": {"style": "one-or-ordered"}},
+                'rules.MD029.style: Expected one of "one", "ordered", "one_or_ordered", '
+                '"zero", got "one-or-ordered"',
+            ),
+            ({"MD060": {"style": "aligned-no-space"}}, "rules.MD060.style: Expected one of"),
+            ({"MD007": {"start_indent": "4"}}, "rules.MD007.start_indent: Expected an integer"),
+            ({"MD999": {}}, "rules.MD999: Unknown rule"),
+            (
+                {"MD013": {"line_length": 100}, "line-length": {"line_length": 120}},
+                "rules.line-length: Duplicates rules.MD013",
+            ),
+        ],
+    )
+    def test_invalid_rule_config(self, rules: dict, message: str) -> None:
+        with pytest.raises(ConfigError) as exc_info:
+            build_rule_configs({"rules": rules})
+
+        assert str(exc_info.value).startswith(message)
+
+    def test_string_for_list_option_shows_list_form(self) -> None:
+        """A comma-separated string for a list option is an error that shows the list form."""
+        with pytest.raises(ConfigError) as exc_info:
+            build_rule_configs({"rules": {"MD033": {"allowed_elements": "br, img"}}})
+
+        assert str(exc_info.value) == (
+            'rules.MD033.allowed_elements: Expected a list of strings, got "br, img"; '
+            'write it as allowed_elements = ["br", "img"]'
+        )
+
+    def test_rules_not_a_table(self) -> None:
+        with pytest.raises(ConfigError, match="^rules: Expected a table"):
+            build_rule_configs({"rules": ["MD013"]})
+
+
+class TestRegexOptions:
+    """Options that hold a regular expression are compiled when the config is loaded."""
+
+    @pytest.mark.parametrize(
+        ("rule", "option"), [("MD041", "front_matter_title"), ("MD051", "ignored_pattern")]
+    )
+    def test_invalid_regex_is_a_config_error(self, rule: str, option: str) -> None:
+        with pytest.raises(
+            ConfigError, match=f"^rules.{rule}.{option}: Invalid regular expression: "
+        ):
+            build_rule_configs({"rules": {rule: {option: "("}}})
+
+    def test_valid_regex_is_accepted(self) -> None:
+        configs = build_rule_configs({"rules": {"MD041": {"front_matter_title": "^name:"}}})
+
+        assert configs["MD041"].front_matter_title == "^name:"
+
+
+class TestResolveRuleNames:
+    """Tests for resolve_rule_names function."""
+
+    def test_resolves_ids_and_names(self) -> None:
+        assert resolve_rule_names(["md013", "line-length", "MD001"]) == ["MD013", "MD013", "MD001"]
+
+    def test_unknown_names_raise(self) -> None:
+        with pytest.raises(ConfigError, match="^Unknown rule\\(s\\): MD999, nope$"):
+            resolve_rule_names(["MD001", "MD999", "nope"])
+
+
+class TestLoadConfigErrors:
+    """load_config reports problems as ConfigError prefixed with the config source."""
+
+    def test_invalid_toml_file(self, tmp_path: Path) -> None:
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text("[rules.MD013\n")
+
+        with pytest.raises(ConfigError, match=f"^{re.escape(str(config_file))}: Invalid TOML: "):
+            load_config(config_path=str(config_file))
+
+    def test_invalid_toml_discovered_file(self, tmp_path: Path, monkeypatch) -> None:
+        (tmp_path / ".mdlint.toml").write_text("[rules.MD013\n")
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(ConfigError, match="Invalid TOML"):
+            load_config()
+
+    def test_invalid_inline_toml(self) -> None:
+        with pytest.raises(ConfigError, match="^<inline>: Invalid TOML: "):
+            load_config(config_path="MD013.line_length=[")
+
+    def test_missing_config_file(self, tmp_path: Path) -> None:
+        missing = tmp_path / "missing.toml"
+
+        with pytest.raises(
+            ConfigError, match=f"^Config file not found: {re.escape(str(missing))}$"
+        ):
+            load_config(config_path=str(missing))
+
+    def test_rule_error_names_source(self, tmp_path: Path) -> None:
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text("[rules.MD013]\nstern = true\n")
+
+        with pytest.raises(
+            ConfigError, match=f"^{re.escape(str(config_file))}: rules.MD013.stern: Unknown option"
+        ):
+            load_config(config_path=str(config_file))
+
+    def test_inline_rule_error_names_source(self) -> None:
+        with pytest.raises(ConfigError, match="^<inline>: rules.MD029.style: Expected one of"):
+            load_config(config_path="MD029.style='one-or-ordered'")
+
+    @pytest.mark.parametrize("key", ["select", "ignore"])
+    def test_unknown_rule_in_rule_list(self, tmp_path: Path, key: str) -> None:
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text(f'{key} = ["MD001", "line-lenght"]\n')
+
+        with pytest.raises(
+            ConfigError,
+            match=f"^{re.escape(str(config_file))}: {key}: Unknown rule\\(s\\): line-lenght$",
+        ):
+            load_config(config_path=str(config_file))
+
+    @pytest.mark.parametrize("key", ["select", "ignore", "exclude"])
+    def test_string_for_top_level_list(self, tmp_path: Path, key: str) -> None:
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text(f'{key} = "MD013"\n')
+
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(config_path=str(config_file))
+
+        assert str(exc_info.value) == (
+            f'{config_file}: {key}: Expected a list of strings, got "MD013"; '
+            f'write it as {key} = ["MD013"]'
+        )
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
@@ -226,6 +414,24 @@ class TestLoadConfig:
             result = load_config(config_path=str(config_file))
 
             assert result.exclude == []
+
+    def test_select_and_ignore_resolve_names(self, tmp_path: Path) -> None:
+        """select/ignore accept rule names and lowercase IDs and store rule IDs."""
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text(
+            'select = ["line-length", "md001"]\nignore = ["heading-increment"]\n'
+        )
+
+        result = load_config(config_path=str(config_file))
+
+        assert result.select == ["MD013", "MD001"]
+        assert result.ignore == ["MD001"]
+        assert result.enabled_rules == {"MD013"}
+
+    def test_inline_config_with_rule_name(self) -> None:
+        result = load_config(config_path="line-length.line_length=100")
+
+        assert result.rules["MD013"].line_length == 100  # type: ignore[attr-defined]
 
 
 class TestApplyCliOverrides:

@@ -22,6 +22,7 @@ class MD041Config(RuleConfig):
     front_matter_title: str = field(
         default=r"^\s*title\s*[:=]",
         metadata={
+            "regex": True,
             "description": (
                 "Regex pattern to match title in front matter. If front matter "
                 "contains a matching line, the rule passes. Set to empty string to "

@@ -45,12 +45,30 @@ run from.
 
 ## Precedence
 
-Configuration is resolved in the following order (highest to lowest priority):
+mdlint reads a single configuration file, and settings from different files are never merged:
 
-1. Command-line options (`--config`, `--select`, `--ignore`, etc.)
-2. `.mdlint.toml` in the project root
-3. `pyproject.toml` under `[tool.mdlint]`
-4. Rule defaults
+1. The file (or inline TOML) given with `--config`
+2. Otherwise, the first file found by searching from the current directory upward; in each directory, `.mdlint.toml` is
+   checked before `pyproject.toml` (which is only used if it has a `[tool.mdlint]` section)
+3. Options not set in that file keep their defaults
+
+The `--select`, `--ignore`, `--exclude` options and their `--extend-*` variants are applied on top of that file.
+
+## Rule names
+
+Rules can be referenced by ID or by name, in any case: `MD013`, `md013` and `line-length` are equivalent. This works in
+`select` and `ignore`, in `[rules.<rule>]` section names, and in the command-line options.
+
+## Validation
+
+The configuration is checked before any file is linted. mdlint exits with code 2 and a one-line message naming the
+config source, rule and option when it finds:
+
+- invalid TOML, or a `--config` path that does not exist
+- an unknown rule or option (option names use underscores: `line_length`, not `line-length`)
+- a value of the wrong type, such as a string where a list is expected (`allowed_elements = ["br", "img"]`, not
+  `allowed_elements = "br, img"`)
+- a value that is not one of the option's allowed choices (each rule's page lists them)
 
 ## Rule selection
 
@@ -92,8 +110,11 @@ mdlint check --config "MD003.style='atx'"
 mdlint check --select MD001 --select MD003
 
 # Ignore specific rules (replaces config ignore list)
-mdlint check --ignore MD002
+mdlint check --ignore MD041
 
 # Add to existing select/ignore lists
 mdlint check --extend-select MD004 --extend-ignore MD005
 ```
+
+A `--config` value that is not an existing file is treated as inline TOML when it contains `=`, and is reported as a
+missing file otherwise.

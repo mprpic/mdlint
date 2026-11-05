@@ -224,8 +224,8 @@ Suppression comments are automatically exempt from triggering MD033 (`no-inline-
 
 ## Exit codes
 
-| Code | Meaning                                               |
-|------|-------------------------------------------------------|
-| 0    | No violations found                                   |
-| 1    | Violations found                                      |
-| 2    | Error occurred (file not found, invalid config, etc.) |
+| Code | Meaning                                                                                                      |
+|------|--------------------------------------------------------------------------------------------------------------|
+| 0    | No violations and no errors                                                                                  |
+| 1    | Violations found, even if some files could not be read                                                       |
+| 2    | Invalid configuration, unknown rule or missing path; or files could not be read and no violations were found |

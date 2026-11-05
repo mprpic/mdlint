@@ -147,6 +147,14 @@ ignore = ["MD041"]
 style = "atx"
 ```
 
+mdlint uses a single configuration file: the one passed with `--config`, or else the first one found by searching from
+the current directory upward (`.mdlint.toml` before `pyproject.toml` in each directory). Settings from other files are
+not merged in.
+
+Rules can be named by ID or by name in any case, for example `MD013`, `md013`, or `line-length`; this applies to
+`select`, `ignore`, `[rules.<rule>]` sections, and the command-line options. Unknown rules, unknown options, and values
+of the wrong type are reported as errors (exit code 2).
+
 ### Rule selection
 
 The `select` and `ignore` options work together:
@@ -185,7 +193,7 @@ mdlint check --config "MD003.style='atx'"
 mdlint check --select MD001 --select MD003
 
 # Ignore specific rules (replaces config ignore list)
-mdlint check --ignore MD002
+mdlint check --ignore MD041
 
 # Add to existing select/ignore lists
 mdlint check --extend-select MD004 --extend-ignore MD005
@@ -199,11 +207,11 @@ mdlint check --verbose
 
 ## Exit codes
 
-| Code | Meaning                                               |
-|------|-------------------------------------------------------|
-| 0    | No violations found                                   |
-| 1    | Violations found                                      |
-| 2    | Error occurred (file not found, invalid config, etc.) |
+| Code | Meaning                                                                                                      |
+|------|--------------------------------------------------------------------------------------------------------------|
+| 0    | No violations and no errors                                                                                  |
+| 1    | Violations found, even if some files could not be read                                                       |
+| 2    | Invalid configuration, unknown rule or missing path; or files could not be read and no violations were found |
 
 ## License
 

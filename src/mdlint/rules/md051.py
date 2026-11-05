@@ -22,6 +22,7 @@ class MD051Config(RuleConfig):
     ignored_pattern: str = field(
         default="",
         metadata={
+            "regex": True,
             "description": "Regular expression pattern for fragments to ignore.",
         },
     )
