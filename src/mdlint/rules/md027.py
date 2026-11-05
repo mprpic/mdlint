@@ -1,5 +1,5 @@
-import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
@@ -22,7 +22,11 @@ class MD027(Rule[MD027Config]):
     description = (
         "This rule is triggered when blockquote lines contain more than one "
         "space after the blockquote marker (`>`). The standard format requires "
-        "exactly one space between the `>` and the content."
+        "exactly one space between the `>` and the content. Indentation that "
+        "belongs to a list inside the blockquote is not flagged; MD005 and "
+        "MD007 check it. The fix leaves a line unchanged when removing the "
+        "spaces would turn it into a different block, such as a heading "
+        "underline."
     )
 
     rationale = (
@@ -40,54 +44,68 @@ class MD027(Rule[MD027Config]):
 >  there should only be one.
 """
 
-    # Pattern to match blockquote marker followed by 2+ spaces
-    # Matches: optional whitespace, one or more >, then 2+ spaces
-    MULTIPLE_SPACES_PATTERN = re.compile(r"^(\s*>+)\s{2,}")
-
-    def _find_multiple_space_lines(self, document: Document) -> list[tuple[int, re.Match[str]]]:
-        """Return list of (line_num, match) for blockquote lines with multiple spaces."""
-        code_block_lines = document.code_block_lines
-        results: list[tuple[int, re.Match[str]]] = []
+    def _find_multiple_space_lines(self, document: Document) -> list[tuple[int, int, int]]:
+        """Return (line number, column of the `>`, end of the extra spaces) per offending line."""
+        skipped = document.code_block_lines | document.html_block_lines
+        results: list[tuple[int, int, int]] = []
 
         for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
+            if line_num in skipped:
                 continue
-            match = self.MULTIPLE_SPACES_PATTERN.match(line)
-            if match:
-                results.append((line_num, match))
+            prefix = document.container_prefix(line_num)
+            marker = prefix.rfind(">")
+            # Only whitespace right after a quote marker counts; a list item opened inside
+            # the quote owns the indentation that follows it.
+            if marker < 0 or len(prefix) - marker > 2:
+                continue
+            rest = line[len(prefix) :]
+            text = rest.lstrip(" \t")
+            if text and len(text) < len(rest):
+                results.append((line_num, marker + 1, len(line) - len(text)))
 
         return results
 
     def check(self, document: Document, config: MD027Config) -> list[Violation]:
         """Check for multiple spaces after blockquote marker."""
-        violations: list[Violation] = []
-
-        for line_num, match in self._find_multiple_space_lines(document):
-            # Calculate column position (after the > marker)
-            column = len(match.group(1)) + 1
-            violations.append(
-                Violation(
-                    line=line_num,
-                    column=column,
-                    rule_id=self.id,
-                    rule_name=self.name,
-                    message="Multiple spaces after blockquote symbol",
-                    context=document.get_line(line_num),
-                )
+        return [
+            Violation(
+                line=line_num,
+                column=marker + 1,
+                rule_id=self.id,
+                rule_name=self.name,
+                message="Multiple spaces after blockquote symbol",
+                context=document.get_line(line_num),
             )
-
-        return violations
+            for line_num, marker, _ in self._find_multiple_space_lines(document)
+        ]
 
     def fix(self, document: Document, config: MD027Config) -> str | None:
         """Fix multiple spaces after blockquote marker by collapsing to one."""
-        matching_lines = self._find_multiple_space_lines(document)
-        if not matching_lines:
-            return None
-
         lines = document.content.split("\n")
-        for line_num, match in matching_lines:
-            prefix = match.group(1)
-            rest = lines[line_num - 1][match.end() :]
-            lines[line_num - 1] = prefix + " " + rest
+        changed = False
+        for line_num, marker, end in self._find_multiple_space_lines(document):
+            line = lines[line_num - 1]
+            prefix_end = len(document.container_prefix(line_num))
+            if self._changes_block(line[prefix_end:], line[end:]):
+                continue
+            lines[line_num - 1] = line[:prefix_end] + line[end:]
+            changed = True
 
-        return "\n".join(lines)
+        return "\n".join(lines) if changed else None
+
+    @staticmethod
+    def _changes_block(indented: str, dedented: str) -> bool:
+        """Whether dropping the indentation turns a line into a different kind of block.
+
+        A line indented four or more columns past the quote is paragraph text even when it
+        reads like ``---`` or ``# x``; without the indentation it would interrupt the
+        paragraph, for example turning it into a setext heading. Both versions are parsed
+        after a paragraph line, which is the only context where such a line survives
+        outside a code block.
+        """
+
+        def shape(line: str) -> list[tuple[str, list[int] | None]]:
+            tokens = Document(Path("<stdin>"), f"x\n{line}\n").tokens
+            return [(token.type, token.map) for token in tokens]
+
+        return shape(indented) != shape(dedented)

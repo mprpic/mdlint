@@ -123,6 +123,35 @@ class TestMD007:
 
         assert len(violations) == 0
 
+    def test_blockquote_in_list(self, rule: MD007, config: MD007Config) -> None:
+        """A list inside a blockquote starts a new nesting level at the blockquote."""
+        content = load_fixture("md007", "blockquote_in_list.md")
+        doc = Document(Path("blockquote_in_list.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert violations == []
+
+    def test_blockquote_with_ordered_parent(self, rule: MD007, config: MD007Config) -> None:
+        """An ordered list outside the blockquote does not exempt the bullets inside it."""
+        content = load_fixture("md007", "blockquote_ordered_parent.md")
+        doc = Document(Path("blockquote_ordered_parent.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [5]
+        assert "Expected 2 spaces, found 3" in violations[0].message
+
+    def test_continuation_lines(self, rule: MD007, config: MD007Config) -> None:
+        """Only the nested item's marker line is reported."""
+        content = load_fixture("md007", "continuation_lines.md")
+        doc = Document(Path("continuation_lines.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [4]
+        assert "Expected 2 spaces, found 4" in violations[0].message
+
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = MD007Config()
@@ -169,6 +198,15 @@ class TestMD007:
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
 
+    def test_fix_keeps_siblings_of_an_item_it_cannot_move(self, rule: MD007) -> None:
+        """If one item of a list cannot move, its siblings stay put too, keeping the nesting."""
+        content = load_fixture("md007", "declined_sibling.md")
+        doc = Document(Path("test.md"), content)
+        config = MD007Config(start_indented=True)
+
+        assert rule.check(doc, config) != []
+        assert rule.fix(doc, config) is None
+
     def test_fix_blockquote_returns_none(self, rule: MD007, config: MD007Config) -> None:
         """Valid blockquote list should return None."""
         content = load_fixture("md007", "blockquote.md")
@@ -184,3 +222,46 @@ class TestMD007:
     def test_fixable_property(self, rule: MD007) -> None:
         """Rule should report as fixable."""
         assert rule.fixable is True
+
+    def test_fix_blockquote_with_ordered_parent(self, rule: MD007, config: MD007Config) -> None:
+        """Fix re-indents the nested bullet inside the blockquote."""
+        content = load_fixture("md007", "blockquote_ordered_parent.md")
+        result = rule.fix(Document(Path("test.md"), content), config)
+        assert result == (
+            "# Ordered Ancestor Outside Blockquote\n\n1. Item\n   > - Quoted item\n"
+            "   >   - Nested with 3 spaces\n"
+        )
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_shifts_continuation_lines(self, rule: MD007, config: MD007Config) -> None:
+        """Fix moves the whole item, including fenced code inside it."""
+        content = load_fixture("md007", "continuation_lines.md")
+        result = rule.fix(Document(Path("test.md"), content), config)
+        assert result == (
+            "# Continuation Lines\n\n- Item\n  - Nested item\n    continuation of nested item\n"
+            "\n    ```text\n    code in nested item\n    ```\n"
+        )
+        fixed = Document(Path("test.md"), result)
+        assert rule.check(fixed, config) == []
+        fence = next(token for token in fixed.tokens if token.type == "fence")
+        assert fence.content == "code in nested item\n"
+
+    def test_fix_declines_when_item_would_leave_parent(
+        self, rule: MD007, config: MD007Config
+    ) -> None:
+        """Items that cannot move without changing the list structure are only reported."""
+        content = load_fixture("md007", "fix_declines.md")
+        doc = Document(Path("test.md"), content)
+
+        assert [v.line for v in rule.check(doc, config)] == [4, 9]
+        assert rule.fix(doc, config) is None
+
+    @pytest.mark.parametrize(
+        "filename", ["invalid.md", "blockquote_ordered_parent.md", "continuation_lines.md"]
+    )
+    def test_fix_is_idempotent(self, rule: MD007, config: MD007Config, filename: str) -> None:
+        """Fixing an already fixed document changes nothing."""
+        content = load_fixture("md007", filename)
+        once = rule.fix(Document(Path("test.md"), content), config)
+        assert once is not None
+        assert rule.fix(Document(Path("test.md"), once), config) is None

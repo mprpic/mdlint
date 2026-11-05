@@ -127,6 +127,27 @@ class TestMD005:
 
         assert len(violations) == 0
 
+    def test_blockquote(self, rule: MD005, config: MD005Config) -> None:
+        """Lists inside blockquotes are measured from the blockquote marker."""
+        content = load_fixture("md005", "blockquote.md")
+        doc = Document(Path("blockquote.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [(4, 3), (9, 4)]
+        assert "Expected 0 spaces, found 1" in violations[0].message
+        assert "Expected 1 spaces, found 2" in violations[1].message
+
+    def test_continuation_lines(self, rule: MD005, config: MD005Config) -> None:
+        """Only the misaligned item's marker line is reported."""
+        content = load_fixture("md005", "continuation_lines.md")
+        doc = Document(Path("continuation_lines.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [4]
+        assert "Expected 0 spaces, found 1" in violations[0].message
+
     def test_empty_document(self, rule: MD005, config: MD005Config) -> None:
         """Empty document should produce no violations."""
         content = load_fixture("md005", "empty.md")
@@ -211,3 +232,34 @@ class TestMD005Fix:
     def test_fixable_property(self, rule: MD005) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True
+
+    def test_fix_blockquote(self, rule: MD005, config: MD005Config) -> None:
+        """Fix aligns blockquoted items and keeps their continuation lines in the item."""
+        content = load_fixture("md005", "blockquote.md")
+        result = rule.fix(Document(Path("test.md"), content), config)
+        assert result == (
+            "# Lists in Blockquotes\n\n>+ Item\n>+ Item\n\nText.\n\n"
+            "> - Item\n> - Item\n>   continuation\n"
+        )
+        assert rule.check(Document(Path("test.md"), result), config) == []
+
+    def test_fix_shifts_continuation_lines(self, rule: MD005, config: MD005Config) -> None:
+        """Fix moves the whole item, including fenced code and nested lists inside it."""
+        content = load_fixture("md005", "continuation_lines.md")
+        result = rule.fix(Document(Path("test.md"), content), config)
+        assert result == (
+            "# Continuation Lines\n\n- Item 1\n- Item 2\n  continuation of item 2\n\n"
+            "  ```text\n  code in item 2\n  ```\n\n  - Nested under item 2\n- Item 3\n"
+        )
+        fixed = Document(Path("test.md"), result)
+        assert rule.check(fixed, config) == []
+        fence = next(token for token in fixed.tokens if token.type == "fence")
+        assert fence.content == "code in item 2\n"
+
+    @pytest.mark.parametrize("filename", ["blockquote.md", "continuation_lines.md"])
+    def test_fix_is_idempotent(self, rule: MD005, config: MD005Config, filename: str) -> None:
+        """Fixing an already fixed document changes nothing."""
+        content = load_fixture("md005", filename)
+        once = rule.fix(Document(Path("test.md"), content), config)
+        assert once is not None
+        assert rule.fix(Document(Path("test.md"), once), config) is None

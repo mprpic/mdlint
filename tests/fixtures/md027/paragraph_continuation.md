@@ -1,0 +1,2 @@
+>  Paragraph with extra space
+>     ---
