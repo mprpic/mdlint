@@ -25,6 +25,9 @@ Lint a directory recursively:
 mdlint check docs/
 ```
 
+Directories are searched for files ending in `.md`, `.markdown`, `.mdown`, `.mkd` or `.mkdn`. Files named on the
+command line are always linted, whatever their extension.
+
 Lint from stdin:
 
 ```bash
@@ -140,8 +143,12 @@ cat README.md | mdlint check --fix -
 
 Not all rules support auto-fixing. When `--fix` is used:
 
-- Fixable rules are applied sequentially to each file
-- Files are modified in-place with the corrected content
+- Fixable rules are applied sequentially to each file, in repeated passes because one rule's fix can leave work for
+  another; passes continue while they reduce the number of fixable violations, up to 10
+- A rule with a violation suppressed by an [inline directive](#inline-suppression) is not applied to that file, so
+  the suppressed lines are left untouched and the rule's other violations there are still reported
+- Files are modified in-place with the corrected content, keeping their line endings (LF or CRLF) and any byte order
+  mark
 - Any remaining unfixable violations are still reported in the output
 - The [rules index](rules/index.md) shows which rules are fixable with a checkmark in the "Fixable" column
 
@@ -159,10 +166,11 @@ List all available rules:
 mdlint rule
 ```
 
-View details for a specific rule:
+View details for a specific rule, by ID or name:
 
 ```bash
 mdlint rule MD001
+mdlint rule line-length
 ```
 
 Include valid/invalid examples:

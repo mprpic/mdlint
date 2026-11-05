@@ -65,6 +65,7 @@ The configuration is checked before any file is linted. mdlint exits with code 2
 config source, rule and option when it finds:
 
 - invalid TOML, or a `--config` path that does not exist
+- a top-level key other than `select`, `ignore`, `exclude` and `rules`, such as a misspelled `selct`
 - an unknown rule or option (option names use underscores: `line_length`, not `line-length`)
 - a value of the wrong type, such as a string where a list is expected (`allowed_elements = ["br", "img"]`, not
   `allowed_elements = "br, img"`)

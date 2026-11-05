@@ -96,22 +96,48 @@ Uses `markdown-it-py` for token-based parsing. The `Document` class provides:
 - `html_block_lines`: (cached) `set[int]` of 1-indexed line numbers inside HTML blocks
 - `code_span_positions`: (cached) `dict[int, set[int]]` mapping line numbers to 1-indexed column positions inside
   inline code spans
-- `reference_definitions`: (cached) `dict[str, str]` mapping lowercase reference IDs to destinations
-- `REFERENCE_DEF_PATTERN`: compiled regex for matching reference definition lines
+- `front_matter_lines`: (cached) `frozenset[int]` of 1-indexed line numbers of the front matter, delimiters included
+- `container_prefix(line)`: leading text of a line that belongs to enclosing blockquotes and list items; skip it when
+  inspecting a line's content and put it back when rewriting the line
+- `continuation_prefix(line)`: prefix a new non-blank line inserted after `line` needs to stay in its containers
+- `blank_container_line(line)`: text to insert as a blank line after `line` (`>` inside a quote, `""` elsewhere)
+- `blank_line_between(above, below)`: blank line to insert between two 1-indexed lines without splitting a blockquote
+- `follows_bare_list_marker(start)`: whether a block starting at 0-indexed line `start` opens a list item whose marker
+  is alone on its line (a blank line inserted there would end the item)
+- `reference_definition_entries`: (cached) `list[ReferenceDefinition]` of every reference definition the parser
+  recognized, in source order, with its normalized label, destination and line span
+- `reference_definition_lines`: (cached) `frozenset[int]` of 1-indexed lines occupied by reference definitions; use
+  this to decide whether a line is a definition
+- `reference_definitions`: (cached) `dict[str, str]` mapping normalized labels to destinations (first definition wins)
+- `REFERENCE_DEF_PATTERN`: compiled regex approximating a reference definition on one line, for locating its parts
+  once `reference_definition_lines` says the line is a definition
+
+Module-level helpers in `document.py`:
+
+- `is_blank_line(line)`: whether a line separates blocks like an empty line does (whitespace, `>` markers and HTML
+  comments only)
+- `normalize_reference_label(label)`: case-folds and collapses whitespace so labels compare as CommonMark matches them
+
+`resolve_rule_id(name)` in `rules/__init__.py` maps a rule ID or name, in any case, to the rule ID (or `None`); CLI
+flags, config files and inline directives all use it.
 
 ### Configuration
 
-Precedence (highest to lowest):
+Only one configuration source is used; settings from different files are never merged:
 
 1. `--config` CLI flag (file path or inline TOML)
-2. `.mdlint.toml` in project
-3. `pyproject.toml` under `[tool.mdlint]`
-4. Rule defaults
+2. Otherwise, the first file found searching upward from the current directory; in each directory `.mdlint.toml` is
+   checked before `pyproject.toml` (used only if it has a `[tool.mdlint]` table)
+3. Rule defaults for anything that file does not set
+
+CLI rule and file selection flags (`--select`, `--ignore`, `--exclude` and their `--extend-*` variants) apply on top.
 
 ### File Discovery
 
 Uses the `ignore` library for gitignore-aware file traversal. The `discover_files()` function in `linter.py` handles
-both files and directories, respecting `.gitignore` patterns by default.
+both files and directories, respecting `.gitignore` patterns by default. Directories are searched for files with an
+extension in `MARKDOWN_EXTENSIONS` (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`); files passed explicitly are always
+included.
 
 ### Exit Codes
 
