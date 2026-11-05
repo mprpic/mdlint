@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import Document, normalize_reference_label
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -30,7 +30,7 @@ class MD059(Rule[MD059Config]):
         'This rule is triggered when a link has generic text like "click here" '
         'or "link". Link text should be descriptive and communicate the purpose '
         'of the link (e.g., "Download document" or "Installation Guide"). '
-        "This rule checks Markdown links only; HTML links are ignored."
+        "This rule checks Markdown links only; images and HTML links are ignored."
     )
 
     rationale = (
@@ -86,6 +86,7 @@ Read [more](https://example.com/article).
 
         # Parse reference definitions
         reference_definitions = document.reference_definitions
+        reference_definition_lines = document.reference_definition_lines
 
         for line_num, line in enumerate(document.lines, start=1):
             # Skip lines in code blocks
@@ -105,6 +106,9 @@ Read [more](https://example.com/article).
 
                 # Track this range as processed
                 processed_ranges.append((match.start(), match.end()))
+
+                if self._is_image(line, match.start()):
+                    continue
 
                 link_text = match.group(1)
 
@@ -136,6 +140,9 @@ Read [more](https://example.com/article).
 
                 # Track this range as processed
                 processed_ranges.append((match.start(), match.end()))
+
+                if self._is_image(line, match.start()):
+                    continue
 
                 link_text = match.group(1)
 
@@ -170,14 +177,16 @@ Read [more](https://example.com/article).
                     continue
 
                 # Skip if this is a reference definition line
-                if Document.REFERENCE_DEF_PATTERN.match(line):
+                if line_num in reference_definition_lines:
+                    continue
+
+                if self._is_image(line, match.start()):
                     continue
 
                 link_text = match.group(1)
-                ref_id_lower = link_text.lower()
 
                 # Only check if reference definition exists
-                if ref_id_lower not in reference_definitions:
+                if normalize_reference_label(link_text) not in reference_definitions:
                     continue
 
                 # Skip if link text contains inline code or HTML
@@ -199,6 +208,11 @@ Read [more](https://example.com/article).
                     )
 
         return violations
+
+    @staticmethod
+    def _is_image(line: str, bracket: int) -> bool:
+        """Whether the bracket opens an image, whose alt text describes the image, not a target."""
+        return bracket > 0 and line[bracket - 1] == "!"
 
     @staticmethod
     def _normalize(text: str) -> str:

@@ -248,6 +248,33 @@ Use `[undefined][ref]` syntax for links.
 
         assert len(violations) == 0
 
+    def test_definition_in_code_block_does_not_count(
+        self, rule: MD052, config: MD052Config
+    ) -> None:
+        """A definition shown inside a code block does not define the label."""
+        content = load_fixture("md052", "code_block_definition.md")
+        doc = Document(Path("code_block_definition.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.message) for v in violations] == [
+            (3, 'Missing link/image reference definition: "ref"')
+        ]
+
+    def test_definition_in_blockquote_counts(self, rule: MD052, config: MD052Config) -> None:
+        """A definition inside a blockquote defines the label."""
+        content = load_fixture("md052", "blockquote_definition.md")
+        doc = Document(Path("blockquote_definition.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_label_whitespace_is_collapsed(self, rule: MD052, config: MD052Config) -> None:
+        """Labels match with internal whitespace collapsed and case ignored."""
+        content = load_fixture("md052", "label_whitespace.md")
+        doc = Document(Path("label_whitespace.md"), content)
+
+        assert rule.check(doc, config) == []
+
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = MD052Config()

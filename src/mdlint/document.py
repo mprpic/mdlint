@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -223,6 +224,29 @@ def _normalize_space(text: str) -> str:
     return " ".join(text.split())
 
 
+def normalize_reference_label(label: str) -> str:
+    """Normalize a link label so that labels CommonMark treats as equal compare equal.
+
+    Matching is case-insensitive with internal whitespace collapsed, so ``[Foo  Bar]:``
+    defines the label that ``[text][foo bar]`` uses.
+    """
+    return _normalize_space(label).casefold()
+
+
+class ReferenceDefinition(NamedTuple):
+    """A link reference definition the parser recognized.
+
+    The span covers every line the definition occupies, because the destination and title
+    may wrap onto following lines and a fix that removes only the first line leaves the rest
+    behind as stray text.
+    """
+
+    label: str  # normalized with normalize_reference_label()
+    destination: str
+    start_line: int  # 1-indexed, inclusive
+    end_line: int  # 1-indexed, inclusive
+
+
 class Document:
     """A parsed Markdown file.
 
@@ -242,6 +266,15 @@ class Document:
             cls._parser = MarkdownIt().enable("table").use(front_matter_plugin)
         return cls._parser
 
+    @classmethod
+    def render_html(cls, content: str) -> str:
+        """Render Markdown as HTML with the parser documents use.
+
+        Fixes compare the rendering before and after an edit to make sure it keeps what a
+        reader sees.
+        """
+        return cls._get_parser().render(content)
+
     def __init__(self, path: Path, content: str) -> None:
         """Initialize document with path and content.
 
@@ -253,7 +286,9 @@ class Document:
         self.content = content
         self.lines = content.splitlines()
 
-        self.tokens: list[Token] = self._get_parser().parse(content)
+        # markdown-it records the reference definitions it recognizes here, not in the tokens.
+        self._parse_env: dict = {}
+        self.tokens: list[Token] = self._get_parser().parse(content, self._parse_env)
 
         # Extract front matter if present
         self.front_matter: str | None = None
@@ -435,6 +470,8 @@ class Document:
                 code_columns.setdefault(line_number, set()).update(columns)
 
     # Pattern to match reference definitions: [ref]: destination [optional title]
+    # It only approximates the syntax on a single line without container prefixes; use
+    # reference_definition_lines to know whether a line really is a definition.
     REFERENCE_DEF_PATTERN = re.compile(
         r"^\s*\[([^\]]+)\]:\s*"
         r"([^\s\"'(]+|<[^>]*>)"  # destination (bare or angle-bracketed)
@@ -442,13 +479,49 @@ class Document:
     )
 
     @cached_property
+    def reference_definition_entries(self) -> list[ReferenceDefinition]:
+        """Every reference definition in source order, duplicate labels included.
+
+        Taken from the parser rather than a line regex so that definitions inside code
+        blocks or ending in prose are excluded, ones inside blockquotes and list items are
+        included, and wrapped definitions keep all their lines.
+        """
+        first = [
+            (label, ref["href"], ref["map"])
+            for label, ref in self._parse_env.get("references", {}).items()
+        ]
+        duplicates = [
+            (ref["label"], ref["href"], ref["map"])
+            for ref in self._parse_env.get("duplicate_refs", [])
+        ]
+        definitions = [
+            ReferenceDefinition(
+                label=normalize_reference_label(label),
+                destination=href,
+                start_line=line_map[0] + 1,
+                end_line=line_map[1],
+            )
+            for label, href, line_map in first + duplicates
+        ]
+        return sorted(definitions, key=lambda definition: definition.start_line)
+
+    @cached_property
+    def reference_definition_lines(self) -> frozenset[int]:
+        """1-indexed line numbers occupied by reference definitions."""
+        return frozenset(
+            line
+            for definition in self.reference_definition_entries
+            for line in range(definition.start_line, definition.end_line + 1)
+        )
+
+    @cached_property
     def reference_definitions(self) -> dict[str, str]:
-        """Reference definitions mapping lowercase IDs to destinations."""
+        """Reference definitions mapping normalized labels to destinations.
+
+        Labels are normalized with normalize_reference_label(); the first definition of a
+        label wins, as it does when the document is rendered.
+        """
         definitions: dict[str, str] = {}
-        for line in self.lines:
-            match = self.REFERENCE_DEF_PATTERN.match(line)
-            if match:
-                ref_id = match.group(1).lower()
-                destination = match.group(2).strip()
-                definitions[ref_id] = destination
+        for definition in self.reference_definition_entries:
+            definitions.setdefault(definition.label, definition.destination)
         return definitions

@@ -256,3 +256,12 @@ class TestMD059:
 
         assert len(violations) == 1
         assert violations[0].context == content
+
+    def test_images_not_checked(self, rule: MD059, config: MD059Config) -> None:
+        """Image alt text is not link text, and definition lines are not links."""
+        content = load_fixture("md059", "images.md")
+        doc = Document(Path("images.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [(9, 8)]

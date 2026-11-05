@@ -423,3 +423,77 @@ More text.
         # Pre-existing double blank line should be preserved
         assert "\n\n\n" in result
         assert "[unused]:" not in result
+
+    def test_prose_is_not_a_definition(self, rule: MD053, config: MD053Config) -> None:
+        """Text that only starts like a definition is neither reported nor deleted."""
+        content = load_fixture("md053", "prose_definition.md")
+        doc = Document(Path("prose_definition.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
+    def test_fix_removes_every_line_of_wrapped_definition(
+        self, rule: MD053, config: MD053Config
+    ) -> None:
+        """Fix removes the destination and title lines along with the label line."""
+        content = load_fixture("md053", "wrapped_definition.md")
+        doc = Document(Path("wrapped_definition.md"), content)
+
+        assert [v.line for v in rule.check(doc, config)] == [5]
+        result = rule.fix(doc, config)
+        assert result == "# Wrapped Definition\n\nText.\n\nMore text.\n"
+        assert rule.fix(Document(Path("wrapped_definition.md"), result), config) is None
+
+    def test_fix_inside_blockquote(self, rule: MD053, config: MD053Config) -> None:
+        """Definitions inside quotes are checked, and removal leaves no dangling quote line."""
+        content = load_fixture("md053", "blockquote_definition.md")
+        doc = Document(Path("blockquote_definition.md"), content)
+
+        violations = rule.check(doc, config)
+        assert [(v.line, v.message) for v in violations] == [
+            (7, 'Unused link or image reference definition: "unused"')
+        ]
+        result = rule.fix(doc, config)
+        assert result == (
+            "# Quoted Definitions\n\n"
+            "> A [quoted link][used].\n"
+            ">\n"
+            "> [used]: https://example.com/used\n\n"
+            "After the quote.\n"
+        )
+        assert rule.fix(Document(Path("blockquote_definition.md"), result), config) is None
+
+    def test_label_whitespace_is_collapsed(self, rule: MD053, config: MD053Config) -> None:
+        """A use matches a definition whose label differs only in whitespace and case."""
+        content = load_fixture("md053", "label_whitespace.md")
+        doc = Document(Path("label_whitespace.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_fix_skips_definition_on_list_marker_line(
+        self, rule: MD053, config: MD053Config
+    ) -> None:
+        """Removing a definition that carries the list marker would break the list item."""
+        content = load_fixture("md053", "list_item_definition.md")
+        doc = Document(Path("list_item_definition.md"), content)
+
+        assert [v.line for v in rule.check(doc, config)] == [3]
+        assert rule.fix(doc, config) is None
+
+    def test_uses_missed_by_line_search(self, rule: MD053, config: MD053Config) -> None:
+        """References the line search misses still count as uses, and are never removed."""
+        content = load_fixture("md053", "uses_missed_by_line_search.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
+    def test_fix_keeps_definition_that_separates_blocks(
+        self, rule: MD053, config: MD053Config
+    ) -> None:
+        """An unused definition between two lists is reported, but removing it would merge them."""
+        content = load_fixture("md053", "separating_definition.md")
+        doc = Document(Path("test.md"), content)
+
+        assert [v.line for v in rule.check(doc, config)] == [5]
+        assert rule.fix(doc, config) is None

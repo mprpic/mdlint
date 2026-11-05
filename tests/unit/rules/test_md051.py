@@ -353,7 +353,7 @@ Bad link: [test](#missing)
         content = """\
 ## Heading with ![alt](img.png)
 
-[link](#heading-with)
+[link](#heading-with-)
 """
         doc = Document(Path("test.md"), content)
 
@@ -397,6 +397,50 @@ Bad link: [test](#missing)
         violations = rule.check(doc, config)
 
         assert len(violations) == 0
+
+    def test_custom_anchors(self, rule: MD051, config: MD051Config) -> None:
+        """Explicit anchors, the slug without them, and GitHub's literal slug are all valid."""
+        content = load_fixture("md051", "custom_anchors.md")
+        doc = Document(Path("custom_anchors.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_link_titles_are_not_part_of_the_fragment(
+        self, rule: MD051, config: MD051Config
+    ) -> None:
+        """Titles after the destination are ignored, in links and quoted definitions alike."""
+        content = load_fixture("md051", "link_titles.md")
+        doc = Document(Path("link_titles.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.message) for v in violations] == [
+            (6, "Expected: #intro; Actual: #Intro"),
+            (8, "Expected: #intro; Actual: #Intro"),
+            (10, "Expected: #intro; Actual: #Intro"),
+        ]
+
+    def test_only_id_and_name_attributes_register_anchors(
+        self, rule: MD051, config: MD051Config
+    ) -> None:
+        """Attributes that merely end in "id" or "name" do not create anchors."""
+        content = load_fixture("md051", "html_attributes.md")
+        doc = Document(Path("html_attributes.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [7, 8]
+
+    def test_heading_text_is_not_trimmed(self, rule: MD051, config: MD051Config) -> None:
+        """Whitespace left next to inline HTML stays in the slug, as on GitHub."""
+        content = load_fixture("md051", "heading_whitespace.md")
+        doc = Document(Path("heading_whitespace.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.message) for v in violations] == [
+            (6, "Link fragment #alpha not found in document")
+        ]
 
     def test_html_anchor_in_code_block(self, rule: MD051, config: MD051Config) -> None:
         """HTML anchors inside code blocks are not valid targets."""
@@ -541,3 +585,15 @@ Use `[Link](#Heading)` as example.
         assert "[Valid](#heading)" in result
         assert "[Case mismatch](#heading)" in result
         assert "[Non-existent](#missing)" in result
+
+    def test_fix_keeps_link_titles(self, rule: MD051, config: MD051Config) -> None:
+        """Fix replaces only the destination, keeping titles and quote markers."""
+        content = load_fixture("md051", "link_titles.md")
+        doc = Document(Path("link_titles.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result == content.replace("#Intro", "#intro")
+        fixed_doc = Document(Path("link_titles.md"), result)
+        assert rule.check(fixed_doc, config) == []
+        assert rule.fix(fixed_doc, config) is None

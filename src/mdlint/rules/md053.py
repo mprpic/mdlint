@@ -1,7 +1,12 @@
 import re
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import (
+    Document,
+    ReferenceDefinition,
+    is_blank_line,
+    normalize_reference_label,
+)
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -72,9 +77,6 @@ Here is a [used link][example].
 [example]: https://duplicate.example.com
 """
 
-    # Pattern to match reference definitions: [label]: url
-    REFERENCE_DEF_PATTERN = re.compile(r"^ {0,3}\[([^\]]+)\]:\s*")
-
     # Patterns that extract reference labels from different link/image syntaxes.
     # Each pattern's group(1) captures the label that references a definition.
     REFERENCE_USE_PATTERNS = [
@@ -88,27 +90,29 @@ Here is a [used link][example].
 
     def _parse_definitions_and_references(
         self, document: Document, config: MD053Config
-    ) -> tuple[dict[str, list[int]], set[str]]:
+    ) -> tuple[dict[str, list[ReferenceDefinition]], set[str]]:
         """Parse reference definitions and collect referenced labels.
 
-        Returns (definitions, references) where definitions maps lowercase labels
-        to lists of line numbers, and references is a set of lowercase labels used.
+        Returns (definitions, references) where definitions maps normalized labels
+        to their definitions in source order, and references is a set of normalized
+        labels used.
         """
-        excluded_lines = document.code_block_lines | document.html_block_lines
+        excluded_lines = (
+            document.code_block_lines
+            | document.html_block_lines
+            | document.reference_definition_lines
+        )
         code_span_positions = document.code_span_positions
-        ignored = {label.lower() for label in config.ignored_definitions}
+        ignored = {normalize_reference_label(label) for label in config.ignored_definitions}
 
-        definitions: dict[str, list[int]] = {}
+        definitions: dict[str, list[ReferenceDefinition]] = {}
+        for definition in document.reference_definition_entries:
+            if definition.label not in ignored:
+                definitions.setdefault(definition.label, []).append(definition)
+
         references: set[str] = set()
         for line_num, line in enumerate(document.lines, start=1):
             if line_num in excluded_lines:
-                continue
-
-            match = self.REFERENCE_DEF_PATTERN.match(line)
-            if match:
-                label = match.group(1).lower()
-                if label not in ignored:
-                    definitions.setdefault(label, []).append(line_num)
                 continue
 
             if "[" not in line:
@@ -118,17 +122,50 @@ Here is a [used link][example].
             for pattern in self.REFERENCE_USE_PATTERNS:
                 for ref_match in pattern.finditer(line):
                     if ref_match.start() + 1 not in line_code_cols:
-                        references.add(ref_match.group(1).lower())
+                        references.add(normalize_reference_label(ref_match.group(1)))
 
         return definitions, references
+
+    def _unused_labels(
+        self, document: Document, config: MD053Config
+    ) -> tuple[dict[str, list[ReferenceDefinition]], set[str]]:
+        """Return the definitions by label and the labels no link or image uses.
+
+        The line-by-line search finds most uses cheaply, but not references that wrap lines,
+        hold brackets or escapes, or come from a malformed inline link that falls back to a
+        reference. So each label it finds no use for is confirmed with the parser: the
+        definition's label is renamed in a copy, and if the rendered page changes, something
+        used it.
+        """
+        definitions, references = self._parse_definitions_and_references(document, config)
+        rendered = Document.render_html(document.content)
+        unused = {
+            label
+            for label, label_definitions in definitions.items()
+            if label not in references
+            and Document.render_html(self._rename_label(document, label_definitions[0])) == rendered
+        }
+        return definitions, unused
+
+    @staticmethod
+    def _rename_label(document: Document, definition: ReferenceDefinition) -> str:
+        """Content with the definition's label changed, so no reference can resolve to it."""
+        lines = document.content.split("\n")
+        line = lines[definition.start_line - 1]
+        bracket = line.index("[", len(document.container_prefix(definition.start_line)))
+        lines[definition.start_line - 1] = (
+            line[: bracket + 1] + "mdlint unused probe " + line[bracket + 1 :]
+        )
+        return "\n".join(lines)
 
     def check(self, document: Document, config: MD053Config) -> list[Violation]:
         """Check for unused or duplicate link/image reference definitions."""
         violations: list[Violation] = []
-        definitions, references = self._parse_definitions_and_references(document, config)
+        definitions, unused = self._unused_labels(document, config)
 
-        for label, line_nums in definitions.items():
-            if label not in references:
+        for label, label_definitions in definitions.items():
+            line_nums = [definition.start_line for definition in label_definitions]
+            if label in unused:
                 line_num = line_nums[0]
                 violations.append(
                     Violation(
@@ -156,22 +193,37 @@ Here is a [used link][example].
         return violations
 
     def fix(self, document: Document, config: MD053Config) -> str | None:
-        """Fix by removing unused and duplicate reference definitions."""
-        definitions, references = self._parse_definitions_and_references(document, config)
+        """Fix by removing unused and duplicate reference definitions.
+
+        A definition that starts on a list item's marker line is left alone, because
+        removing that line would remove the marker and detach the rest of the item. Each
+        removal is kept only if the rendered page stays the same, so a definition that
+        separates two lists or code blocks (which would merge without it) is kept.
+        """
+        definitions, unused = self._unused_labels(document, config)
+        rendered = Document.render_html(document.content)
 
         lines_to_remove: set[int] = set()
-        for label, line_nums in definitions.items():
-            if label not in references:
-                lines_to_remove.update(line_nums)
-            else:
-                for dup_line_num in line_nums[1:]:
-                    lines_to_remove.add(dup_line_num)
+        for label, label_definitions in definitions.items():
+            removable = label_definitions if label in unused else label_definitions[1:]
+            for definition in removable:
+                prefix = document.container_prefix(definition.start_line)
+                if prefix.replace(">", "").strip():
+                    continue
+                trial = lines_to_remove | set(range(definition.start_line, definition.end_line + 1))
+                if Document.render_html(self._remove_lines(document, trial)) == rendered:
+                    lines_to_remove = trial
 
         if not lines_to_remove:
             return None
+        return self._remove_lines(document, lines_to_remove)
 
-        # Remove flagged lines and collapse consecutive blank lines only
-        # when the removal created them (not pre-existing ones)
+    @staticmethod
+    def _remove_lines(document: Document, lines_to_remove: set[int]) -> str:
+        """Content without the given 1-indexed lines.
+
+        Consecutive blank lines are collapsed only where the removal created them.
+        """
         lines = document.content.split("\n")
         result: list[str] = []
         prev_blank = False
@@ -180,8 +232,12 @@ Here is a [used link][example].
             if line_num in lines_to_remove:
                 just_removed = True
                 continue
-            is_blank = line.strip() == ""
+            # A comment separates blocks like a blank line does, but it is content to keep.
+            is_blank = is_blank_line(line) and "<!--" not in line
             if is_blank and prev_blank and just_removed:
+                # Keep the shallower of the two blank lines so a quote does not end on ">".
+                if line.count(">") < result[-1].count(">"):
+                    result[-1] = line
                 continue
             result.append(line)
             prev_blank = is_blank

@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import Document, normalize_reference_label
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -86,14 +86,18 @@ This is an image: ![alt text][no-image]
         """Check for undefined reference link/image violations."""
         violations: list[Violation] = []
 
-        # Build set of defined labels (case-insensitive)
+        # Build set of defined labels (normalized like CommonMark matches them)
         defined_labels = set(document.reference_definitions.keys())
 
-        # Build set of ignored labels (case-insensitive)
-        ignored = {label.lower() for label in config.ignored_labels}
+        # Build set of ignored labels (normalized the same way)
+        ignored = {normalize_reference_label(label) for label in config.ignored_labels}
 
-        # Get lines in code blocks and HTML blocks to skip
-        skip_lines = document.code_block_lines | document.html_block_lines
+        # Get lines in code blocks, HTML blocks and the definitions themselves to skip
+        skip_lines = (
+            document.code_block_lines
+            | document.html_block_lines
+            | document.reference_definition_lines
+        )
 
         # Get inline code span columns per line
         code_span_positions = document.code_span_positions
@@ -122,7 +126,7 @@ This is an image: ![alt text][no-image]
                     if check_collapsed and self._is_collapsed_reference(line, match.start()):
                         continue
 
-                    label = match.group(1).lower()
+                    label = normalize_reference_label(match.group(1))
                     if label not in defined_labels and label not in ignored:
                         label_name = match.group(1)
                         violations.append(

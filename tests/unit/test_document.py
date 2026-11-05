@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from mdlint.document import Document, is_blank_line
+from mdlint.document import (
+    Document,
+    ReferenceDefinition,
+    is_blank_line,
+    normalize_reference_label,
+)
 from tests.conftest import load_fixture
 
 
@@ -210,3 +215,40 @@ class TestCodeSpanPositions:
         line23 = doc.lines[22]
         expected23 = self._cols(line23, "`<b>`", "`<b>`") | self._cols(line23, "`<i>`", "`<i>`")
         assert doc.code_span_positions[23] == expected23
+
+
+class TestReferenceDefinitions:
+    @pytest.fixture
+    def doc(self) -> Document:
+        return Document(
+            Path("reference_definitions.md"),
+            load_fixture("document", "reference_definitions.md"),
+        )
+
+    def test_entries_follow_the_parser(self, doc: Document) -> None:
+        # Fenced and prose lines are not definitions; quoted, wrapped and list ones are.
+        assert doc.reference_definition_entries == [
+            ReferenceDefinition("foo bar", "https://example.com/foo", 3, 3),
+            ReferenceDefinition("foo bar", "https://example.com/duplicate", 4, 4),
+            ReferenceDefinition("quoted", "https://example.com/quoted", 6, 6),
+            ReferenceDefinition("wrapped", "https://example.com/wrapped", 14, 16),
+            ReferenceDefinition("item", "https://example.com/item", 18, 18),
+        ]
+
+    def test_first_definition_wins(self, doc: Document) -> None:
+        assert doc.reference_definitions == {
+            "foo bar": "https://example.com/foo",
+            "quoted": "https://example.com/quoted",
+            "wrapped": "https://example.com/wrapped",
+            "item": "https://example.com/item",
+        }
+
+    def test_lines_cover_wrapped_definitions(self, doc: Document) -> None:
+        assert doc.reference_definition_lines == {3, 4, 6, 14, 15, 16, 18}
+
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [("Foo  Bar", "foo bar"), (" a\tb\nc ", "a b c"), ("Straße", "strasse")],
+    )
+    def test_normalize_label(self, label: str, expected: str) -> None:
+        assert normalize_reference_label(label) == expected

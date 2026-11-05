@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -244,3 +245,36 @@ class TestMD011:
         doc = Document(Path("test.md"), "")
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_scan_edge_cases(self, rule: MD011, config: MD011Config) -> None:
+        """Overlapping, escaped, nested, footnote and empty candidates match as before."""
+        content = load_fixture("md011", "scan_edge_cases.md")
+        doc = Document(Path("scan_edge_cases.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (3, 1, "Reversed link syntax: (a)[b)[c]"),
+            (5, 1, "Reversed link syntax: (p)[q]"),
+            (5, 8, "Reversed link syntax: (r)[s]"),
+            (5, 22, "Reversed link syntax: (u)[v]"),
+        ]
+        result = rule.fix(doc, config)
+        assert result is not None
+        assert "[a](b)[c)" in result
+        assert "[p](q) [r](s) x)[t] ([u](v)" in result
+        assert rule.fix(Document(Path("scan_edge_cases.md"), result), config) is None
+
+    @pytest.mark.parametrize(("tail", "expected"), [("", 0), ("](", 0), ("]", 1)])
+    def test_long_line_is_scanned_in_linear_time(
+        self, rule: MD011, config: MD011Config, tail: str, expected: int
+    ) -> None:
+        """An 80k-character line of unclosed candidates does not backtrack quadratically."""
+        doc = Document(Path("test.md"), "# T\n\n" + "(a)[" * 20000 + tail + "\n")
+
+        start = time.perf_counter()
+        violations = rule.check(doc, config)
+        elapsed = time.perf_counter() - start
+
+        assert len(violations) == expected
+        assert elapsed < 0.5

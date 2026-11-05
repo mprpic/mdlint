@@ -1,4 +1,3 @@
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -54,18 +53,49 @@ This is a document with (incorrect link syntax)[https://www.example.com/].
 Here is (another bad link)[https://example.org/page] in a sentence.
 """
 
-    # Pattern to match reversed links: (text)[url]
-    # - Must not start with backslash (escaped)
-    # - Captures: (1) preceding char, (2) link text, (3) link destination
-    # - Does not match footnote references [^...] or if followed by (
-    REVERSED_LINK_PATTERN = re.compile(r"(^|[^\\])\(([^()]+)\)\[([^]^][^]]*)](?!\()")
+    @staticmethod
+    def _scan_line(line: str) -> Iterator[tuple[int, int, str, str]]:
+        """Yield (start, end, link_text, link_dest) for each reversed link in a line.
 
-    def _find_reversed_links(
-        self, document: Document
-    ) -> Iterator[tuple[int, re.Match[str], str, str, str, int]]:
+        A match is `(text)[dest]` where the `(` is not escaped, the text holds no
+        parentheses, the destination does not start with `^` (a footnote) and the `]` is
+        not followed by `(`. Matches do not overlap. This is a single left-to-right scan
+        because the equivalent regex backtracked quadratically on long lines of
+        unclosed candidates such as `(a)[(a)[(a)[...`.
+        """
+        search_from = 0  # end of the previous match
+        previous = -1  # index of the previous ")[" candidate
+        close = -1  # next "]" at or after the current destination, found once and reused
+        pos = line.find(")[")
+        while pos >= 0:
+            # The text cannot contain ")", so its "(" lies after the previous candidate;
+            # bounding the search there keeps the whole scan linear.
+            lower = max(search_from, previous + 1)
+            previous = pos
+            opener = max(line.rfind("(", lower, pos), line.rfind(")", lower, pos))
+            dest_start = pos + 2
+            if (
+                opener >= 0
+                and line[opener] == "("
+                and opener < pos - 1
+                and (opener == 0 or line[opener - 1] != "\\")
+                and dest_start < len(line)
+                and line[dest_start] not in "]^"
+            ):
+                if close < dest_start:
+                    close = line.find("]", dest_start)
+                    if close < 0:
+                        return
+                if line[close + 1 : close + 2] != "(":
+                    yield opener, close + 1, line[opener + 1 : pos], line[dest_start:close]
+                    search_from = close + 1
+            pos = line.find(")[", max(pos + 1, search_from))
+
+    def _find_reversed_links(self, document: Document) -> Iterator[tuple[int, int, int, str, str]]:
         """Yield reversed link matches with metadata.
 
-        Yields tuples of (line_num, match, pre_char, link_text, link_dest, column).
+        Yields tuples of (line_num, start, end, link_text, link_dest), where start and
+        end are the 0-indexed span of the reversed link in the line.
         """
         code_block_lines = document.code_block_lines
         html_block_lines = document.html_block_lines
@@ -78,31 +108,26 @@ Here is (another bad link)[https://example.org/page] in a sentence.
             if ")[" not in line:
                 continue
 
-            for match in self.REVERSED_LINK_PATTERN.finditer(line):
-                pre_char = match.group(1)
-                link_text = match.group(2)
-                link_dest = match.group(3)
-
+            for start, end, link_text, link_dest in self._scan_line(line):
                 if link_text.endswith("\\") or link_dest.endswith("\\"):
                     continue
 
-                column = match.start() + len(pre_char) + 1
                 code_cols = inline_code_columns.get(line_num, set())
-                if code_cols and column in code_cols:
+                if code_cols and start + 1 in code_cols:
                     continue
 
-                yield line_num, match, pre_char, link_text, link_dest, column
+                yield line_num, start, end, link_text, link_dest
 
     def check(self, document: Document, config: MD011Config) -> list[Violation]:
         """Check for reversed link syntax."""
         violations: list[Violation] = []
 
-        for line_num, match, pre_char, _, _, column in self._find_reversed_links(document):
-            reversed_link = match.group(0)[len(pre_char) :]
+        for line_num, start, end, _, _ in self._find_reversed_links(document):
+            reversed_link = document.lines[line_num - 1][start:end]
             violations.append(
                 Violation(
                     line=line_num,
-                    column=column,
+                    column=start + 1,
                     rule_id=self.id,
                     rule_name=self.name,
                     message=f"Reversed link syntax: {reversed_link}",
@@ -115,11 +140,9 @@ Here is (another bad link)[https://example.org/page] in a sentence.
     def fix(self, document: Document, config: MD011Config) -> str | None:
         """Fix reversed link syntax by swapping (text)[url] to [text](url)."""
         # Group matches by line number, collecting in reverse order per line
-        matches_by_line: dict[int, list[tuple[re.Match[str], str, str, str]]] = {}
-        for line_num, match, pre_char, link_text, link_dest, _ in self._find_reversed_links(
-            document
-        ):
-            matches_by_line.setdefault(line_num, []).append((match, pre_char, link_text, link_dest))
+        matches_by_line: dict[int, list[tuple[int, int, str, str]]] = {}
+        for line_num, start, end, link_text, link_dest in self._find_reversed_links(document):
+            matches_by_line.setdefault(line_num, []).append((start, end, link_text, link_dest))
 
         if not matches_by_line:
             return None
@@ -128,9 +151,8 @@ Here is (another bad link)[https://example.org/page] in a sentence.
         for line_num, line_matches in matches_by_line.items():
             line = lines[line_num - 1]
             # Process in reverse order to preserve column positions
-            for match, pre_char, link_text, link_dest in reversed(line_matches):
-                start = match.start() + len(pre_char)
-                line = line[:start] + f"[{link_text}]({link_dest})" + line[match.end() :]
+            for start, end, link_text, link_dest in reversed(line_matches):
+                line = line[:start] + f"[{link_text}]({link_dest})" + line[end:]
             lines[line_num - 1] = line
 
         return "\n".join(lines)

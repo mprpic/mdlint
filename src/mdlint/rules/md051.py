@@ -40,7 +40,9 @@ class MD051(Rule[MD051Config]):
         "This rule checks that link fragments (internal links starting with `#`) "
         "reference valid anchors in the document. Valid anchors include headings "
         "(converted to fragments using when Markdown is displayed on GitHub), HTML elements with "
-        "`id` attributes, and `<a>` elements with `name` attributes."
+        "`id` attributes, and `<a>` elements with `name` attributes. A heading with a "
+        "`{#anchor}` suffix can be linked as `#anchor`, by its slug without the suffix, "
+        "or by the slug GitHub generates when it shows the suffix as text."
     )
 
     rationale = (
@@ -79,17 +81,17 @@ Another [bad link](#missing-section) here.
     # Pattern to match inline links: [text](destination)
     INLINE_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 
-    # Pattern to match HTML id attribute
-    HTML_ID_PATTERN = re.compile(r'id\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+    # Pattern to match HTML id attribute (not attributes ending in "id", such as data-id)
+    HTML_ID_PATTERN = re.compile(r'(?<!\S)id\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
     # Pattern to match HTML name attribute (for <a> tags)
-    HTML_NAME_PATTERN = re.compile(r'name\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+    HTML_NAME_PATTERN = re.compile(r'(?<!\S)name\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
     # Pattern to match opening HTML tags
     HTML_TAG_PATTERN = re.compile(r"<\s*([a-zA-Z][a-zA-Z0-9]*)\s*([^>]*)>", re.IGNORECASE)
 
     # Pattern to match custom anchor syntax {#anchor-name} in headings
-    CUSTOM_ANCHOR_PATTERN = re.compile(r"\{(#[a-z\d]+(?:[-_][a-z\d]+)*)\}")
+    CUSTOM_ANCHOR_PATTERN = re.compile(r"\{(#[a-z\d]+(?:[-_]+[a-z\d]+)*)\}")
 
     # Pattern to match GitHub line fragment syntax
     LINE_FRAGMENT_PATTERN = re.compile(r"^#(?:L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?|L\d+)$")
@@ -99,17 +101,20 @@ Another [bad link](#missing-section) here.
 
     def _find_fragment_links(
         self, document: Document, config: MD051Config
-    ) -> Iterator[tuple[int, int, re.Match[str], str, str | None]]:
-        """Yield fragment link matches with metadata.
+    ) -> Iterator[tuple[int, int, int, int, str, str]]:
+        """Yield invalid fragment links with metadata.
 
-        Yields tuples of (line_num, column, match, destination, matching_key).
-        matching_key is the correctly-cased fragment for case mismatches, or None
-        if the fragment is valid or not found at all.
+        Yields tuples of (line_num, column, start, end, destination, matching_key), where
+        start and end are the 0-indexed span of the destination in the line. matching_key
+        is the correctly-cased fragment for case mismatches, or "" if not found at all.
         """
         code_block_lines = document.code_block_lines
         fragments = self._collect_fragments(document, code_block_lines)
         fragments_lower: dict[str, str] = {k.lower(): k for k in fragments}
         code_span_positions = document.code_span_positions
+        definition_lines = {
+            definition.start_line for definition in document.reference_definition_entries
+        }
 
         ignored_pattern_re = None
         if config.ignored_pattern:
@@ -124,23 +129,46 @@ Another [bad link](#missing-section) here.
                 if column in code_span_positions.get(line_num, set()):
                     continue
 
-                destination = match.group(2).strip()
+                start, end = self._destination_span(line, match.start(2), match.end(2))
+                destination = line[start:end]
                 result = self._classify_fragment(
                     destination, fragments, fragments_lower, config, ignored_pattern_re
                 )
                 if result is not None:
-                    yield line_num, column, match, destination, result
+                    yield line_num, column, start, end, destination, result
 
-            ref_match = Document.REFERENCE_DEF_PATTERN.match(line)
+            if line_num not in definition_lines:
+                continue
+            prefix_len = len(document.container_prefix(line_num))
+            ref_match = Document.REFERENCE_DEF_PATTERN.match(line[prefix_len:])
             if ref_match:
-                destination = ref_match.group(2).strip()
-                dest_start = line.find(destination)
-                column = dest_start + 1 if dest_start >= 0 else 1
+                start, end = self._destination_span(
+                    line, prefix_len + ref_match.start(2), prefix_len + ref_match.end(2)
+                )
+                destination = line[start:end]
                 result = self._classify_fragment(
                     destination, fragments, fragments_lower, config, ignored_pattern_re
                 )
                 if result is not None:
-                    yield line_num, column, ref_match, destination, result
+                    yield line_num, start + 1, start, end, destination, result
+
+    @staticmethod
+    def _destination_span(line: str, start: int, end: int) -> tuple[int, int]:
+        """Narrow a link's parenthesized or definition text to the bare destination.
+
+        The text can hold a title after the destination, and the destination can be
+        wrapped in angle brackets; neither belongs to the fragment.
+        """
+        while start < end and line[start].isspace():
+            start += 1
+        if start < end and line[start] == "<":
+            close = line.find(">", start, end)
+            if close >= 0:
+                return start + 1, close
+        stop = start
+        while stop < end and not line[stop].isspace():
+            stop += 1
+        return start, stop
 
     def _classify_fragment(
         self,
@@ -184,7 +212,7 @@ Another [bad link](#missing-section) here.
         """Check for invalid link fragment violations."""
         violations: list[Violation] = []
 
-        for line_num, column, _, destination, matching_key in self._find_fragment_links(
+        for line_num, column, _, _, destination, matching_key in self._find_fragment_links(
             document, config
         ):
             if matching_key:
@@ -211,11 +239,11 @@ Another [bad link](#missing-section) here.
         Only fixes fragments that exist in the document but with different casing.
         Non-existent fragments are left unchanged since intent cannot be determined.
         """
-        replacements_by_line: dict[int, list[tuple[re.Match[str], str]]] = {}
+        replacements_by_line: dict[int, list[tuple[int, int, str]]] = {}
 
-        for line_num, _, match, _, matching_key in self._find_fragment_links(document, config):
+        for line_num, _, start, end, _, matching_key in self._find_fragment_links(document, config):
             if matching_key:
-                replacements_by_line.setdefault(line_num, []).append((match, matching_key))
+                replacements_by_line.setdefault(line_num, []).append((start, end, matching_key))
 
         if not replacements_by_line:
             return None
@@ -223,9 +251,7 @@ Another [bad link](#missing-section) here.
         lines = document.content.split("\n")
         for line_num, line_replacements in replacements_by_line.items():
             line = lines[line_num - 1]
-            for match, new_dest in reversed(line_replacements):
-                start = match.start(2)
-                end = match.end(2)
+            for start, end, new_dest in sorted(line_replacements, reverse=True):
                 line = line[:start] + new_dest + line[end:]
             lines[line_num - 1] = line
 
@@ -247,8 +273,15 @@ Another [bad link](#missing-section) here.
                 if i + 1 < len(tokens) and tokens[i + 1].type == "inline":
                     heading_text = self._extract_heading_text(tokens[i + 1])
                     if heading_text:
-                        fragment = self._heading_to_fragment(heading_text)
-                        if fragment != "#":
+                        slugs = [self._heading_to_fragment(heading_text)]
+                        if self.CUSTOM_ANCHOR_PATTERN.search(heading_text):
+                            # GitHub renders {#anchor} literally and slugs it with the rest
+                            # of the text; renderers that support it drop it from the text.
+                            stripped = self.CUSTOM_ANCHOR_PATTERN.sub("", heading_text).strip()
+                            slugs.append(self._heading_to_fragment(stripped))
+                        for fragment in slugs:
+                            if fragment == "#":
+                                continue
                             count = fragments.get(fragment, 0)
                             if count:
                                 fragments[f"{fragment}-{count}"] = 0
@@ -308,17 +341,17 @@ Another [bad link](#missing-section) here.
         3. Convert spaces to dashes
         4. URL-encode the result
 
+        The text is not trimmed: GitHub keeps the space left next to inline HTML or an
+        image, so ``## Alpha <a id="x"></a>`` links as ``#alpha-``.
+
         Args:
             heading_text: The heading text.
 
         Returns:
             The fragment string with leading #.
         """
-        # Remove custom anchor syntax from heading text
-        text = self.CUSTOM_ANCHOR_PATTERN.sub("", heading_text).strip()
-
         # Convert to lowercase
-        text = text.lower()
+        text = heading_text.lower()
 
         # Remove characters that are not in allowed Unicode categories
         # Allowed: Letter, Mark, Number, Connector_Punctuation, dash, space
