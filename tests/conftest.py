@@ -1,7 +1,15 @@
 from pathlib import Path
 
+import pytest
+
 # Path to test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_terminal_width(monkeypatch) -> None:
+    """Rich sizes output to the terminal running the tests; pin the width CI sees."""
+    monkeypatch.setenv("COLUMNS", "80")
 
 
 def fixture_path(rule_id: str, filename: str) -> Path:

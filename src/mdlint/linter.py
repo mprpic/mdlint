@@ -1,5 +1,6 @@
 import fnmatch
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
@@ -10,6 +11,31 @@ from mdlint.rules import RULE_REGISTRY
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.suppression import filter_suppressed
 from mdlint.violation import Violation
+
+MARKDOWN_EXTENSIONS = frozenset({".md", ".markdown", ".mdown", ".mkd", ".mkdn"})
+
+# Upper bound on fix passes per file; see Linter.fix_file().
+MAX_FIX_PASSES = 10
+
+_BOM = "\ufeff"
+_LINE_ENDING = re.compile(r"\r\n?|\n")
+
+
+def _split_encoding(text: str) -> tuple[str, str, str]:
+    """Separate a leading BOM and the line-ending style from the text that rules see.
+
+    Rules and markdown-it expect "\\n"-separated lines and would read a BOM as content (so a
+    first-line heading is not seen as one). Fixes put both back on write, so the only changes
+    to a file are the ones rules made.
+
+    Returns:
+        Tuple of (bom, newline, text): bom is "" or U+FEFF, newline is the first line ending
+        found ("\\n" if there is none), and text has every line ending replaced by "\\n".
+    """
+    bom = _BOM if text.startswith(_BOM) else ""
+    match = _LINE_ENDING.search(text)
+    newline = match.group() if match else "\n"
+    return bom, newline, _LINE_ENDING.sub("\n", text[len(bom) :])
 
 
 @dataclass
@@ -89,7 +115,9 @@ def discover_files(
     """Discover Markdown files from given paths.
 
     Args:
-        paths: List of file or directory paths.
+        paths: List of file or directory paths. Files given here are always included (callers
+            such as pre-commit pass Markdown files of any extension); directories are searched
+            for files with an extension in MARKDOWN_EXTENSIONS.
         respect_gitignore: Whether to respect ignore patterns.
         exclude_patterns: Glob patterns to exclude files/directories.
 
@@ -113,7 +141,8 @@ def discover_files(
 
     for entry in walker.build():
         path = Path(entry.path())
-        if path.is_file() and path.suffix.lower() == ".md":
+        # Depth 0 entries are the paths given by the caller.
+        if path.is_file() and (entry.depth() == 0 or path.suffix.lower() in MARKDOWN_EXTENSIONS):
             files.append(path)
 
     if exclude_patterns:
@@ -201,7 +230,8 @@ class Linter:
         """
         try:
             if content is None:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes().decode("utf-8")
+            _, _, content = _split_encoding(content)
 
             if document is None:
                 document = Document(path, content)
@@ -218,7 +248,7 @@ class Linter:
 
             return FileResult(path=path, violations=violations, content=content)
 
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             return FileResult(path=path, error=str(e))
 
     def lint_stdin(self, content: str) -> FileResult:
@@ -235,8 +265,13 @@ class Linter:
     def fix_file(self, path: Path, content: str | None = None) -> FileResult:
         """Fix and lint a single file.
 
-        Applies fixable rules sequentially, writes back if changed, then
-        collects remaining violations from all rules.
+        Fixable rules run in passes, and a pass is repeated because one rule's fix can create
+        work for a rule that already ran. Every pass after the first must reduce the number of
+        unsuppressed violations of fixable rules or it is discarded: this stops fixes that never
+        resolve their own violation from growing the file on each pass, and since the count is
+        a function of the content, a strictly decreasing count also rules out cycles. At most
+        MAX_FIX_PASSES passes run. The result is written back if it changed, then remaining
+        violations are collected from all rules.
 
         Args:
             path: File path.
@@ -247,39 +282,34 @@ class Linter:
         """
         try:
             if content is None:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_bytes().decode("utf-8")
+            bom, newline, original = _split_encoding(content)
 
-            was_fixed = False
-            document = Document(path, content)
+            fixable = [(rule, config) for rule, config in self._rules if rule.fixable]
+            document = Document(path, original)
 
-            # Cache check() results from the fix loop. When content changes,
-            # the cache is invalidated so only results checked against the
-            # final document are reused in the violation-collection pass below.
+            # check() results for `document`, reused by the next pass and by the final
+            # violation collection below. Each pass fills its own copy so that discarding
+            # the pass leaves results that match the kept document.
             cached_violations: dict[str, list[Violation]] = {}
+            remaining = self._count_unsuppressed(document, fixable, cached_violations)
 
-            for rule, config in self._rules:
-                if not rule.fixable:
-                    continue
+            for pass_number in range(MAX_FIX_PASSES):
+                if remaining == 0:
+                    break
+                pass_cache = dict(cached_violations)
+                fixed = self._fix_pass(document, fixable, pass_cache)
+                if fixed.content == document.content:
+                    break
+                fixed_remaining = self._count_unsuppressed(fixed, fixable, pass_cache)
+                if pass_number > 0 and fixed_remaining >= remaining:
+                    break
+                document, cached_violations, remaining = fixed, pass_cache, fixed_remaining
 
-                rule_violations = rule.check(document, config)
-                cached_violations[rule.id] = rule_violations
-                if not rule_violations:
-                    continue
-
-                # Skip fix if all violations for this rule are suppressed
-                non_suppressed = filter_suppressed(document, rule_violations)
-                if not non_suppressed:
-                    continue
-
-                fixed = rule.fix(document, config)
-                if fixed is not None:
-                    content = fixed
-                    document = Document(path, content)
-                    cached_violations.clear()
-                    was_fixed = True
-
+            content = document.content
+            was_fixed = content != original
             if was_fixed and path != Path("<stdin>"):
-                path.write_text(content, encoding="utf-8")
+                path.write_text(bom + content.replace("\n", newline), encoding="utf-8", newline="")
 
             # Collect final violations from all rules, reusing cached results
             # for fixable rules already checked against the final document.
@@ -297,8 +327,58 @@ class Linter:
             result.was_fixed = was_fixed
             return result
 
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             return FileResult(path=path, error=str(e))
+
+    @staticmethod
+    def _count_unsuppressed(
+        document: Document,
+        fixable: list[tuple[Rule, RuleConfig]],
+        cached_violations: dict[str, list[Violation]],
+    ) -> int:
+        """Measure how much fixing is left, to decide whether a fix pass made progress.
+
+        Fills `cached_violations` (which must only hold results for `document`) as a side
+        effect, so the next pass or the final collection does not re-run these checks.
+        """
+        violations: list[Violation] = []
+        for rule, config in fixable:
+            if rule.id not in cached_violations:
+                cached_violations[rule.id] = rule.check(document, config)
+            violations.extend(cached_violations[rule.id])
+        return len(filter_suppressed(document, violations))
+
+    @staticmethod
+    def _fix_pass(
+        document: Document,
+        fixable: list[tuple[Rule, RuleConfig]],
+        cached_violations: dict[str, list[Violation]],
+    ) -> Document:
+        """Apply each fixable rule's fix once, in registry order.
+
+        `cached_violations` must only hold check() results for `document`; it is updated in
+        place to hold results for the returned document.
+        """
+        for rule, config in fixable:
+            if rule.id not in cached_violations:
+                cached_violations[rule.id] = rule.check(document, config)
+            violations = cached_violations[rule.id]
+            if not violations:
+                continue
+
+            # fix() rewrites the whole document and its edits depend on each other (both
+            # fences of one block, say), so it cannot be applied around a suppressed
+            # violation. A rule with a suppressed violation is left unfixed in this file.
+            unsuppressed = filter_suppressed(document, violations)
+            if not unsuppressed or len(unsuppressed) < len(violations):
+                continue
+
+            fixed = rule.fix(document, config)
+            if fixed is not None and fixed != document.content:
+                document = Document(document.path, fixed)
+                cached_violations.clear()
+
+        return document
 
     def fix_stdin(self, content: str) -> tuple[FileResult, str]:
         """Fix content from stdin.
@@ -310,7 +390,10 @@ class Linter:
             Tuple of (FileResult with remaining violations, fixed content).
         """
         result = self.fix_file(Path("<stdin>"), content=content)
-        return result, result.content or content
+        if result.content is None:
+            return result, content
+        bom, newline, _ = _split_encoding(content)
+        return result, bom + result.content.replace("\n", newline)
 
     def fix_paths(
         self,

@@ -134,6 +134,58 @@ class TestLinter:
 
         assert result.error is None
 
+    def test_lint_file_invalid_utf8(self, tmp_path: Path) -> None:
+        """An undecodable file is reported as an error, not raised."""
+        bad_file = tmp_path / "bad.md"
+        bad_file.write_bytes(b"# Title\n\ncaf\xe9\n")
+
+        result = Linter().lint_file(bad_file)
+
+        assert result.error is not None
+        assert "utf-8" in result.error
+        assert len(result.violations) == 0
+
+    def test_lint_paths_continues_after_invalid_utf8(self, tmp_path: Path) -> None:
+        """One undecodable file does not stop the others from being linted."""
+        (tmp_path / "bad.md").write_bytes(b"# Title\n\ncaf\xe9\n")
+        (tmp_path / "ok.md").write_text("# Title\n\n### Skipped\n")
+
+        result = Linter().lint_paths([tmp_path])
+
+        assert result.files_checked == 2
+        assert result.files_with_errors == 1
+        assert result.files_with_violations == 1
+
+    def test_lint_file_with_bom(self, tmp_path: Path) -> None:
+        """A byte order mark is not treated as content before the first heading."""
+        bom_file = tmp_path / "bom.md"
+        content = fixture_path("linter", "clean.md").read_text(encoding="utf-8")
+        bom_file.write_bytes(("\ufeff" + content).encode("utf-8"))
+
+        result = Linter().lint_file(bom_file)
+
+        assert result.violations == []
+        assert result.content == content
+
+    def test_lint_stdin_with_bom(self) -> None:
+        """Stdin content with a byte order mark is linted like a file."""
+        content = fixture_path("linter", "clean.md").read_text(encoding="utf-8")
+
+        result = Linter().lint_stdin("\ufeff" + content)
+
+        assert result.violations == []
+
+    def test_lint_file_crlf_content_normalized(self, tmp_path: Path) -> None:
+        """CRLF files are linted with LF line endings so context lines carry no CR."""
+        crlf_file = tmp_path / "crlf.md"
+        content = fixture_path("linter", "clean.md").read_text(encoding="utf-8")
+        crlf_file.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+
+        result = Linter().lint_file(crlf_file)
+
+        assert result.violations == []
+        assert result.content == content
+
     def test_lint_paths_multiple_files(self, tmp_path: Path) -> None:
         """Lint multiple paths at once."""
         # Create test files
@@ -248,14 +300,24 @@ class TestDiscoverFiles:
         assert len(files) == 1
         assert files[0] == md_file
 
-    def test_discover_non_md_file_excluded(self, tmp_path: Path) -> None:
-        """Non-markdown files are excluded."""
+    def test_discover_explicit_file_any_extension(self, tmp_path: Path) -> None:
+        """Files named explicitly are included whatever their extension."""
         txt_file = tmp_path / "test.txt"
         txt_file.write_text("# Test")
 
         files = discover_files([txt_file])
 
-        assert len(files) == 0
+        assert files == [txt_file]
+
+    def test_discover_markdown_extensions(self, tmp_path: Path) -> None:
+        """Directory discovery includes every common Markdown extension."""
+        for name in ("a.md", "b.markdown", "c.mdown", "d.mkd", "e.mkdn", "f.MARKDOWN", "g.txt"):
+            (tmp_path / name).write_text("# Test")
+
+        files = discover_files([tmp_path])
+
+        filenames = {f.name for f in files}
+        assert filenames == {"a.md", "b.markdown", "c.mdown", "d.mkd", "e.mkdn", "f.MARKDOWN"}
 
     def test_discover_directory_only_md_files(self, tmp_path: Path) -> None:
         """Directory discovery only includes .md files."""
