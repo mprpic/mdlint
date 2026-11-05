@@ -118,6 +118,18 @@ class TestLinterFixFile:
         md024_violations = [v for v in result.violations if v.rule_id == "MD024"]
         assert len(md024_violations) >= 1
 
+    def test_fix_file_with_line_separators_in_text(self, tmp_path) -> None:
+        """Characters that str.splitlines() treats as line breaks do not shift fixes."""
+        content = load_fixture("document", "line_separators.md")
+        test_file = tmp_path / "test.md"
+        test_file.write_text(content, encoding="utf-8")
+
+        result = Linter().fix_file(test_file)
+
+        expected = content.replace("separator   \n", "separator\n")
+        assert result.content == expected
+        assert test_file.read_text(encoding="utf-8") == expected
+
     def test_fix_file_writes_back(self, tmp_path) -> None:
         """fix_file writes fixed content back to disk."""
         linter = Linter()

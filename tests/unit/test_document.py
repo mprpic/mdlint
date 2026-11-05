@@ -56,6 +56,15 @@ class TestDocument:
 
         assert doc.lines[0] == "# Simple Document"
 
+    def test_lines_split_only_on_newlines(self) -> None:
+        """Form feeds and Unicode line separators do not end a line."""
+        content = load_fixture("document", "line_separators.md")
+        doc = Document(Path("line_separators.md"), content)
+
+        assert len(doc.lines) == 5
+        assert doc.get_line(3) == "form\x0cfeed and line\u2028separator   "
+        assert doc.get_line(5) == "last"
+
 
 class TestFrontMatterLines:
     def test_lines_include_delimiters(self) -> None:

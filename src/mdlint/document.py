@@ -284,7 +284,12 @@ class Document:
         """
         self.path = path
         self.content = content
-        self.lines = content.splitlines()
+        # Only "\n" ends a line here, as in markdown-it's line numbers and in fixes, which
+        # split on it (the linter has already turned "\r\n" and "\r" into "\n").
+        # str.splitlines() would also split on form feeds and Unicode line separators.
+        self.lines = content.split("\n")
+        if self.lines[-1] == "":
+            self.lines.pop()  # the final line ending does not start another line
 
         # markdown-it records the reference definitions it recognizes here, not in the tokens.
         self._parse_env: dict = {}
