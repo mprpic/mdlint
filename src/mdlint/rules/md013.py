@@ -113,7 +113,7 @@ Another paragraph with a line that is also way too long and should be flagged by
         heading_lines = self._get_heading_lines(document)
         code_block_lines = document.code_block_lines
         table_lines = self._get_table_lines(document)
-        ref_def_lines = self._get_reference_definition_lines(document)
+        ref_def_lines = document.reference_definition_lines
         link_only_lines = self._get_link_only_lines(document)
         front_matter_lines = document.front_matter_lines
 
@@ -203,24 +203,6 @@ Another paragraph with a line that is also way too long and should be flagged by
                     table_lines.add(line_num)
 
         return table_lines
-
-    @staticmethod
-    def _get_reference_definition_lines(document: Document) -> set[int]:
-        """Get line numbers that are reference definitions.
-
-        Code block lines are skipped because definition syntax there is just code and must
-        stay subject to `code_blocks` and `code_block_line_length`.
-        """
-        ref_lines: set[int] = set()
-        code_block_lines = document.code_block_lines
-
-        for line_num, line in enumerate(document.lines, start=1):
-            if line_num in code_block_lines:
-                continue
-            if Document.REFERENCE_DEF_PATTERN.match(line):
-                ref_lines.add(line_num)
-
-        return ref_lines
 
     @staticmethod
     def _get_link_only_lines(document: Document) -> set[int]:

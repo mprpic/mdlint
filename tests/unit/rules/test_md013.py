@@ -296,6 +296,16 @@ class TestMD013:
 
         assert len(violations) == 0
 
+    def test_reference_definitions_in_containers_and_wrapped(self, rule: MD013) -> None:
+        """Definitions inside blockquotes and every line of a wrapped definition are exempt."""
+        content = load_fixture("md013", "reference_def_containers.md")
+        doc = Document(Path("reference_def_containers.md"), content)
+        config = MD013Config(strict=True)
+
+        violations = rule.check(doc, config)
+
+        assert len(violations) == 0
+
     def test_reference_definitions_in_code_blocks_checked(self, rule: MD013) -> None:
         """Reference-definition syntax inside a code block is code, not a definition."""
         content = load_fixture("md013", "reference_def_in_code_block.md")

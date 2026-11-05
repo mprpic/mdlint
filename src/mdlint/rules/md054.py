@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import Document, normalize_reference_label
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -129,6 +129,7 @@ Reference links [like this][ref] are also used.
 
         # Parse reference definitions for resolving shortcuts
         reference_definitions = document.reference_definitions
+        reference_definition_lines = document.reference_definition_lines
 
         for line_num, line in enumerate(document.lines, start=1):
             # Skip lines in code blocks
@@ -136,7 +137,7 @@ Reference links [like this][ref] are also used.
                 continue
 
             # Skip reference definition lines
-            if Document.REFERENCE_DEF_PATTERN.match(line):
+            if line_num in reference_definition_lines:
                 continue
 
             # Track processed ranges to avoid duplicate reports
@@ -234,7 +235,7 @@ Reference links [like this][ref] are also used.
                     processed_ranges.append((match.start(), match.end()))
 
                     is_image = match.group(1) == "!"
-                    ref_id = match.group(ref_group).lower()
+                    ref_id = normalize_reference_label(match.group(ref_group))
 
                     # Only report if reference definition exists
                     if ref_id in reference_definitions:

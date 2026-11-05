@@ -137,6 +137,23 @@ class TestMD054:
         assert len(violations) == 2
         assert violations[0].rule_id == "MD054"
 
+    def test_reference_definitions(self, rule: MD054) -> None:
+        """Labels match definitions as CommonMark does, and definition lines are skipped.
+
+        `[Foo  Bar]` uses the `[foo bar]` definition, and a definition inside a blockquote
+        is not a shortcut link.
+        """
+        config = MD054Config(full=False, shortcut=False)
+        content = load_fixture("md054", "reference_definitions.md")
+        doc = Document(Path("reference_definitions.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (3, 11, "Full reference link style not allowed"),
+            (3, 39, "Shortcut reference link style not allowed"),
+        ]
+
     def test_url_inline_allowed(self, rule: MD054, config: MD054Config) -> None:
         """URL inline links pass when allowed."""
         content = load_fixture("md054", "url_inline.md")
