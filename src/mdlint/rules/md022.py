@@ -99,7 +99,7 @@ Some more text.
                 if (
                     lines_above > 0
                     and heading_start_line > 1
-                    and not _follows_bare_list_marker(document, token.map[0])
+                    and not document.follows_bare_list_marker(token.map[0])
                 ):
                     blank_count = self._count_blank_lines_above(
                         document, heading_start_line, skipped_above
@@ -175,7 +175,7 @@ Some more text.
                     idx += 1
                 if existing_below < lines_below:
                     blanks_to_add = lines_below - existing_below
-                    blank = _blank_between(document, heading_end, heading_end + 1)
+                    blank = document.blank_line_between(heading_end, heading_end + 1)
                     for _ in range(blanks_to_add):
                         lines.insert(heading_end, blank)
                     changed = True
@@ -184,7 +184,7 @@ Some more text.
             if (
                 lines_above > 0
                 and heading_start > 0
-                and not _follows_bare_list_marker(document, heading_start)
+                and not document.follows_bare_list_marker(heading_start)
             ):
                 existing_above = 0
                 idx = heading_start - 1
@@ -196,7 +196,7 @@ Some more text.
                     # disable-next-line directives stay attached to the heading.
                     blanks_to_add = lines_above - existing_above
                     insert_at = max(idx + 1, skipped_above)
-                    blank = _blank_between(document, idx + 1, heading_start + 1)
+                    blank = document.blank_line_between(idx + 1, heading_start + 1)
                     for _ in range(blanks_to_add):
                         lines.insert(insert_at, blank)
                     changed = True
@@ -280,34 +280,3 @@ Some more text.
                 break
 
         return count
-
-
-def _blank_between(document: Document, above: int, below: int) -> str:
-    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
-
-    An empty line would end a quote that both lines are in, so inside one this is the
-    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
-    ends there is not itself quoted.
-    """
-    candidates = (document.blank_container_line(above), document.blank_container_line(below))
-    return min(candidates, key=lambda text: text.count(">"))
-
-
-def _follows_bare_list_marker(document: Document, start: int) -> bool:
-    """Whether a block starting at 0-indexed line `start` opens a bare list item.
-
-    A list item can begin with at most one blank line, so after a marker that sits alone
-    on its line a blank line would end the item and push the block out of the list.
-    """
-    marker_line = document.get_line(start)
-    if marker_line is None or is_blank_line(marker_line):
-        return False  # the usual case, decided without scanning every token
-    if marker_line[len(document.container_prefix(start)) :].strip():
-        return False
-    return any(
-        token.type == "list_item_open"
-        and token.map is not None
-        and token.map[0] == start - 1
-        and token.map[1] > start
-        for token in document.tokens
-    )

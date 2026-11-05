@@ -386,6 +386,40 @@ class Document:
         """
         return self.continuation_prefix(line_number).rstrip()
 
+    def blank_line_between(self, above: int, below: int) -> str:
+        """Blank line to insert between two 1-indexed lines without splitting a blockquote.
+
+        An empty line would end a quote that both lines are in, so inside one this is the
+        ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
+        ends there is not itself quoted.
+        """
+        candidates = (self.blank_container_line(above), self.blank_container_line(below))
+        return min(candidates, key=lambda text: text.count(">"))
+
+    def follows_bare_list_marker(self, start: int) -> bool:
+        """Whether a block starting at 0-indexed line `start` opens a bare list item.
+
+        A list item can begin with at most one blank line, so after a marker that sits alone
+        on its line a blank line would end the item and push the block out of the list.
+        """
+        marker_line = self.get_line(start)
+        if marker_line is None or marker_line[len(self.container_prefix(start)) :].strip():
+            return False
+        return self._list_item_ends.get(start - 1, 0) > start
+
+    @cached_property
+    def _list_item_ends(self) -> dict[int, int]:
+        """Furthest end line of the list items opening on each 0-indexed line.
+
+        Rules ask about every heading, fence and table, so this is built once instead of
+        scanning all tokens per question.
+        """
+        ends: dict[int, int] = {}
+        for token in self.tokens:
+            if token.type == "list_item_open" and token.map is not None:
+                ends[token.map[0]] = max(ends.get(token.map[0], 0), token.map[1])
+        return ends
+
     @cached_property
     def code_span_positions(self) -> dict[int, set[int]]:
         """Column positions inside inline code spans.

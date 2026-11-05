@@ -73,7 +73,7 @@ Some text here.
             table_end_line = table_end  # exclusive, so last line of table
 
             # Check blank line above
-            if table_start_line > 1 and not _follows_bare_list_marker(document, table_start):
+            if table_start_line > 1 and not document.follows_bare_list_marker(table_start):
                 line_above = document.get_line(table_start_line - 1)
                 if line_above is not None and not is_blank_line(line_above):
                     violations.append(
@@ -123,13 +123,13 @@ Some text here.
             # Fix blank line below
             if table_end < num_doc_lines:
                 if not is_blank_line(lines[table_end]):
-                    lines.insert(table_end, _blank_between(document, table_end, table_end + 1))
+                    lines.insert(table_end, document.blank_line_between(table_end, table_end + 1))
                     changed = True
 
             # Fix blank line above
-            if table_start > 0 and not _follows_bare_list_marker(document, table_start):
+            if table_start > 0 and not document.follows_bare_list_marker(table_start):
                 if not is_blank_line(lines[table_start - 1]):
-                    blank = _blank_between(document, table_start, table_start + 1)
+                    blank = document.blank_line_between(table_start, table_start + 1)
                     lines.insert(table_start, blank)
                     changed = True
 
@@ -137,34 +137,3 @@ Some text here.
             return None
 
         return "\n".join(lines)
-
-
-def _blank_between(document: Document, above: int, below: int) -> str:
-    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
-
-    An empty line would end a quote that both lines are in, so inside one this is the
-    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
-    ends there is not itself quoted.
-    """
-    candidates = (document.blank_container_line(above), document.blank_container_line(below))
-    return min(candidates, key=lambda text: text.count(">"))
-
-
-def _follows_bare_list_marker(document: Document, start: int) -> bool:
-    """Whether a block starting at 0-indexed line `start` opens a bare list item.
-
-    A list item can begin with at most one blank line, so after a marker that sits alone
-    on its line a blank line would end the item and push the block out of the list.
-    """
-    marker_line = document.get_line(start)
-    if marker_line is None or is_blank_line(marker_line):
-        return False  # the usual case, decided without scanning every token
-    if marker_line[len(document.container_prefix(start)) :].strip():
-        return False
-    return any(
-        token.type == "list_item_open"
-        and token.map is not None
-        and token.map[0] == start - 1
-        and token.map[1] > start
-        for token in document.tokens
-    )

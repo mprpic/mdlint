@@ -155,6 +155,29 @@ class TestContainerPrefix:
         assert doc.continuation_prefix(1000) == ""
         assert doc.blank_container_line(-1) == ""
 
+    @pytest.mark.parametrize(
+        ("above", "below", "blank"),
+        [
+            (55, 56, ">"),  # inside a quote
+            (57, 58, ""),  # a quote ends at the upper line
+            (45, 46, ""),  # a quote starts at the lower line
+            (18, 19, ""),  # inside a list item
+        ],
+    )
+    def test_blank_line_between(self, doc: Document, above: int, below: int, blank: str) -> None:
+        assert doc.blank_line_between(above, below) == blank
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ("-\n  # Heading\n", True),
+            ("- Item\n  # Heading\n", False),
+            ("Text\n# Heading\n", False),
+        ],
+    )
+    def test_follows_bare_list_marker(self, content: str, expected: bool) -> None:
+        assert Document(Path("test.md"), content).follows_bare_list_marker(1) is expected
+
 
 class TestCodeSpanPositions:
     @pytest.fixture

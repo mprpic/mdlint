@@ -157,26 +157,17 @@ Some text here.
             last_line = document.get_line(list_end)
             if last_line is not None and not is_blank_line(last_line) and list_end < num_doc_lines:
                 if not is_blank_line(lines[list_end]):
-                    lines.insert(list_end, _blank_between(document, list_end, list_end + 1))
+                    lines.insert(list_end, document.blank_line_between(list_end, list_end + 1))
                     changed = True
 
             # Fix blank line above
             if list_start > 1 and not is_blank_line(lines[list_start - 2]):
-                lines.insert(list_start - 1, _blank_between(document, list_start - 1, list_start))
+                lines.insert(
+                    list_start - 1, document.blank_line_between(list_start - 1, list_start)
+                )
                 changed = True
 
         if not changed:
             return None
 
         return "\n".join(lines)
-
-
-def _blank_between(document: Document, above: int, below: int) -> str:
-    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
-
-    An empty line would end a quote that both lines are in, so inside one this is the
-    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
-    ends there is not itself quoted.
-    """
-    candidates = (document.blank_container_line(above), document.blank_container_line(below))
-    return min(candidates, key=lambda text: text.count(">"))
