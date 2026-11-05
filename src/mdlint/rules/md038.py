@@ -57,6 +57,9 @@ This has `  spaces on both sides  ` in code.
     def check(self, document: Document, config: MD038Config) -> list[Violation]:
         """Check for spaces inside code span elements."""
         violations: list[Violation] = []
+        # Table cells of one row are separate inline tokens that share the row's map, so
+        # each cell's search continues where the previous cell's ended.
+        resume_at: dict[tuple[int, int], int] = {}
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
@@ -68,7 +71,8 @@ This has `  spaces on both sides  ` in code.
             prefixes, source_lines = _strip_container_prefixes(document, raw_lines, start_line_1)
             source = "\n".join(source_lines)
 
-            search_pos = 0
+            row = (token.map[0], token.map[1])
+            search_pos = resume_at.get(row, 0)
             for child in token.children:
                 if child.type != "code_inline":
                     continue
@@ -136,12 +140,16 @@ This has `  spaces on both sides  ` in code.
                         )
                     )
 
+            resume_at[row] = search_pos
+
         return violations
 
     def fix(self, document: Document, config: MD038Config) -> str | None:
         """Fix spaces inside code span elements by stripping unnecessary whitespace."""
         lines = document.content.split("\n")
         changed = False
+        # As in check(), table cells of one row continue the previous cell's search.
+        resume_at: dict[tuple[int, int], int] = {}
 
         for token in document.tokens:
             if token.type != "inline" or not token.children or not token.map:
@@ -157,7 +165,8 @@ This has `  spaces on both sides  ` in code.
             new_source = source
             offset_adj = 0
 
-            search_pos = 0
+            row = (token.map[0], token.map[1])
+            search_pos = resume_at.get(row, 0)
             for child in token.children:
                 if child.type != "code_inline":
                     continue
@@ -206,6 +215,9 @@ This has `  spaces on both sides  ` in code.
                 new_source = new_source[:adj_start] + new_span + new_source[adj_end:]
                 offset_adj += len(new_span) - old_span_len
                 changed = True
+
+            # The next cell reads the rewritten row, so resume in its coordinates.
+            resume_at[row] = search_pos + offset_adj
 
             if new_source != source:
                 new_lines = [

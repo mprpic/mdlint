@@ -328,3 +328,30 @@ class TestMD038:
         assert lines[7:9] == ["> Wrapped `quoted", "> span` here."]
         assert lines[10] == "- Item with `trailing` space."
         assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_table_cells(self, rule: MD038, config: MD038Config) -> None:
+        """Each cell of a row is checked once, at its own column.
+
+        Cells of a row are separate inline tokens that share the row's line, so a search
+        that restarts at the beginning of the row finds the first cell's span every time.
+        """
+        content = load_fixture("md038", "table_cells.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (5, 4, "Code span has leading space(s)"),
+            (5, 13, "Code span has trailing space(s)"),
+            (6, 12, "Code span has leading space(s)"),
+        ]
+
+    def test_fix_table_cells(self, rule: MD038, config: MD038Config) -> None:
+        content = load_fixture("md038", "table_cells.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.splitlines()[4:6] == ["| `x`  | `y`   |", "| `ok`  | `z`   |"]
+        assert rule.fix(Document(Path("test.md"), result), config) is None
