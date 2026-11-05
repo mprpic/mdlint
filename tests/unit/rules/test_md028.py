@@ -206,3 +206,26 @@ class TestMD028:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_github_alerts_still_reported(self, rule: MD028, config: MD028Config) -> None:
+        """Alerts separated by a blank line are separate quotes, so the gap is reported."""
+        content = load_fixture("md028", "github_alerts.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [3]
+
+    def test_fix_declines_before_github_alert(self, rule: MD028, config: MD028Config) -> None:
+        """Merging would turn the second alert's marker into plain text in the first."""
+        content = load_fixture("md028", "github_alerts.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_merges_only_non_alert_quotes(self, rule: MD028, config: MD028Config) -> None:
+        """Plain quotes are merged; a following alert (any case) is left separate."""
+        content = load_fixture("md028", "github_alerts_mixed.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "> Plain one.\n>\n> Plain two.\n\n> [!caution]\n> Careful.\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None

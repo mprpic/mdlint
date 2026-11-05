@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import Document, is_blank_line
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -46,6 +46,11 @@ class MD022(Rule[MD022Config]):
         "end of a document does not require blank lines below. Set "
         "`lines_above` or `lines_below` to `-1` to disable the "
         "respective check.\n\n"
+        "Lines holding only blockquote markers (`>`) or HTML comments count as "
+        "blank, so headings inside blockquotes and headings directly below a "
+        "directive comment are accepted. A heading that opens a list item "
+        "whose marker sits alone on the line above needs no blank line above "
+        "it, because a blank line there would end the list item.\n\n"
         "Front matter is ignored by default, so a heading on the line "
         "immediately after the closing front matter delimiter is not "
         "flagged. Set `include_front_matter` to `true` to require the "
@@ -91,7 +96,11 @@ Some more text.
                 heading_end_line = token.map[1]  # exclusive, so last line is map[1]
 
                 # Check blank lines above
-                if lines_above > 0 and heading_start_line > 1:
+                if (
+                    lines_above > 0
+                    and heading_start_line > 1
+                    and not _follows_bare_list_marker(document, token.map[0])
+                ):
                     blank_count = self._count_blank_lines_above(
                         document, heading_start_line, skipped_above
                     )
@@ -161,26 +170,35 @@ Some more text.
             if lines_below > 0 and heading_end < num_doc_lines:
                 existing_below = 0
                 idx = heading_end
-                while idx < num_doc_lines and lines[idx].strip() == "":
+                while idx < num_doc_lines and is_blank_line(lines[idx]):
                     existing_below += 1
                     idx += 1
                 if existing_below < lines_below:
                     blanks_to_add = lines_below - existing_below
+                    blank = _blank_between(document, heading_end, heading_end + 1)
                     for _ in range(blanks_to_add):
-                        lines.insert(heading_end, "")
+                        lines.insert(heading_end, blank)
                     changed = True
 
             # Fix blank lines above
-            if lines_above > 0 and heading_start > 0:
+            if (
+                lines_above > 0
+                and heading_start > 0
+                and not _follows_bare_list_marker(document, heading_start)
+            ):
                 existing_above = 0
                 idx = heading_start - 1
-                while idx >= 0 and (idx < skipped_above or lines[idx].strip() == ""):
+                while idx >= 0 and (idx < skipped_above or is_blank_line(lines[idx])):
                     existing_above += 1
                     idx -= 1
                 if existing_above < lines_above:
+                    # Insert right below the preceding content, so comments such as
+                    # disable-next-line directives stay attached to the heading.
                     blanks_to_add = lines_above - existing_above
+                    insert_at = max(idx + 1, skipped_above)
+                    blank = _blank_between(document, idx + 1, heading_start + 1)
                     for _ in range(blanks_to_add):
-                        lines.insert(heading_start, "")
+                        lines.insert(insert_at, blank)
                     changed = True
 
         if not changed:
@@ -230,7 +248,7 @@ Some more text.
         while line_num >= 1:
             line_content = document.get_line(line_num)
             if line_num <= skipped_above or (
-                line_content is not None and line_content.strip() == ""
+                line_content is not None and is_blank_line(line_content)
             ):
                 count += 1
                 line_num -= 1
@@ -255,10 +273,41 @@ Some more text.
 
         while line_num <= len(document.lines):
             line_content = document.get_line(line_num)
-            if line_content is not None and line_content.strip() == "":
+            if line_content is not None and is_blank_line(line_content):
                 count += 1
                 line_num += 1
             else:
                 break
 
         return count
+
+
+def _blank_between(document: Document, above: int, below: int) -> str:
+    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
+
+    An empty line would end a quote that both lines are in, so inside one this is the
+    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
+    ends there is not itself quoted.
+    """
+    candidates = (document.blank_container_line(above), document.blank_container_line(below))
+    return min(candidates, key=lambda text: text.count(">"))
+
+
+def _follows_bare_list_marker(document: Document, start: int) -> bool:
+    """Whether a block starting at 0-indexed line `start` opens a bare list item.
+
+    A list item can begin with at most one blank line, so after a marker that sits alone
+    on its line a blank line would end the item and push the block out of the list.
+    """
+    marker_line = document.get_line(start)
+    if marker_line is None or is_blank_line(marker_line):
+        return False  # the usual case, decided without scanning every token
+    if marker_line[len(document.container_prefix(start)) :].strip():
+        return False
+    return any(
+        token.type == "list_item_open"
+        and token.map is not None
+        and token.map[0] == start - 1
+        and token.map[1] > start
+        for token in document.tokens
+    )

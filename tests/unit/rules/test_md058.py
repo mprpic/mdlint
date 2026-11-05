@@ -308,3 +308,34 @@ class TestMD058:
         assert result is not None
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    def test_blockquote_marker_lines_count_as_blank(self, rule: MD058, config: MD058Config) -> None:
+        """A line holding only `>` separates a table inside a blockquote."""
+        content = load_fixture("md058", "blockquote_separators.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_comment_line_counts_as_blank(self, rule: MD058, config: MD058Config) -> None:
+        """A directive comment directly above a table does not need its own blank line."""
+        content = load_fixture("md058", "comment_above.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_table_after_bare_list_marker(self, rule: MD058, config: MD058Config) -> None:
+        """A table opening a list item whose marker is alone on the line above is valid."""
+        content = load_fixture("md058", "bare_list_marker.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
+    def test_fix_blockquote_inserts_quote_marker(self, rule: MD058, config: MD058Config) -> None:
+        """Blank lines inserted inside a blockquote keep the `>` marker."""
+        content = load_fixture("md058", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+        assert len(rule.check(doc, config)) == 2
+        result = rule.fix(doc, config)
+        assert result == "> Text\n>\n> | a | b |\n> | - | - |\n> | 1 | 2 |\n>\n> # Heading\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None

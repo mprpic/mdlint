@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mdlint.document import Document
+from mdlint.document import Document, is_blank_line
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -23,7 +23,10 @@ class MD032(Rule[MD032Config]):
         "lists (ordered or unordered) are not preceded or followed by a "
         "blank line. The first list in a document does not require a blank "
         "line above, and the last list at the end of a document does not "
-        "require a blank line below."
+        "require a blank line below.\n\n"
+        "Lines holding only blockquote markers (`>`) or HTML comments count as "
+        "blank, so lists inside blockquotes and lists directly below a "
+        "directive comment are accepted."
     )
 
     rationale = (
@@ -98,7 +101,7 @@ Some text here.
             # Check blank line above
             if list_start > 1:
                 line_above = document.get_line(list_start - 1)
-                if line_above is not None and line_above.strip() != "":
+                if line_above is not None and not is_blank_line(line_above):
                     violations.append(
                         Violation(
                             line=list_start,
@@ -115,9 +118,13 @@ Some text here.
             # their range; if the last mapped line is already blank,
             # no violation is possible.
             last_line = document.get_line(list_end)
-            if last_line is not None and last_line.strip() != "" and list_end < len(document.lines):
+            if (
+                last_line is not None
+                and not is_blank_line(last_line)
+                and list_end < len(document.lines)
+            ):
                 line_below = document.get_line(list_end + 1)
-                if line_below is not None and line_below.strip() != "":
+                if line_below is not None and not is_blank_line(line_below):
                     violations.append(
                         Violation(
                             line=list_end,
@@ -148,17 +155,28 @@ Some text here.
             # Fix blank line below: list token maps may include a trailing
             # blank line; only check below if the last mapped line is non-blank.
             last_line = document.get_line(list_end)
-            if last_line is not None and last_line.strip() != "" and list_end < num_doc_lines:
-                if lines[list_end].strip() != "":
-                    lines.insert(list_end, "")
+            if last_line is not None and not is_blank_line(last_line) and list_end < num_doc_lines:
+                if not is_blank_line(lines[list_end]):
+                    lines.insert(list_end, _blank_between(document, list_end, list_end + 1))
                     changed = True
 
             # Fix blank line above
-            if list_start > 1 and lines[list_start - 2].strip() != "":
-                lines.insert(list_start - 1, "")
+            if list_start > 1 and not is_blank_line(lines[list_start - 2]):
+                lines.insert(list_start - 1, _blank_between(document, list_start - 1, list_start))
                 changed = True
 
         if not changed:
             return None
 
         return "\n".join(lines)
+
+
+def _blank_between(document: Document, above: int, below: int) -> str:
+    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
+
+    An empty line would end a quote that both lines are in, so inside one this is the
+    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
+    ends there is not itself quoted.
+    """
+    candidates = (document.blank_container_line(above), document.blank_container_line(below))
+    return min(candidates, key=lambda text: text.count(">"))

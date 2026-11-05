@@ -273,6 +273,36 @@ class TestMD022:
 
         assert len(violations) == 0
 
+    def test_blockquote_marker_lines_count_as_blank(self, rule: MD022, config: MD022Config) -> None:
+        """A line holding only `>` separates a heading inside a blockquote."""
+        content = load_fixture("md022", "blockquote_separators.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_comment_line_counts_as_blank(self, rule: MD022, config: MD022Config) -> None:
+        """A directive comment directly above a heading does not need its own blank line."""
+        content = load_fixture("md022", "directive_above.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_heading_in_blockquote_missing_blanks(self, rule: MD022, config: MD022Config) -> None:
+        """A heading inside a blockquote still needs separation from quoted text."""
+        content = load_fixture("md022", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, "above" in v.message) for v in violations] == [(2, True), (2, False)]
+
+    def test_heading_after_bare_list_marker(self, rule: MD022, config: MD022Config) -> None:
+        """A heading opening a list item whose marker is alone on the line above is valid."""
+        content = load_fixture("md022", "bare_list_marker.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
     def test_lines_below_negative_one(self, rule: MD022) -> None:
         """lines_below=-1 disables the below check."""
         config = MD022Config(lines_below=-1)
@@ -433,3 +463,40 @@ class TestMD022Fix:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_fix_blockquote_inserts_quote_marker(self, rule: MD022, config: MD022Config) -> None:
+        """Blank lines inserted inside a blockquote keep the `>` marker."""
+        content = load_fixture("md022", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "> Text\n>\n> # Heading\n>\n> More text\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_container_boundary(self, rule: MD022, config: MD022Config) -> None:
+        """A blank line between quoted and unquoted lines is not quoted."""
+        content = load_fixture("md022", "container_boundary.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Paragraph.\n\n> # Quoted heading\n>\n> Text\n\n# Heading\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_keeps_directive_above_heading(self, rule: MD022, config: MD022Config) -> None:
+        """A directive comment above a heading is not separated from it."""
+        content = load_fixture("md022", "directive_above.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None
+
+    def test_fix_inserts_above_directive(self, rule: MD022) -> None:
+        """Missing blank lines go above a directive comment, not between it and the heading."""
+        config = MD022Config(lines_above=2)
+        content = load_fixture("md022", "directive_above_tight.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "Some text.\n\n<!-- mdlint: disable-next-line MD026 -->\n## Heading!\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_bare_list_marker(self, rule: MD022, config: MD022Config) -> None:
+        """No blank line is inserted after a bare list marker, which would empty the item."""
+        content = load_fixture("md022", "bare_list_marker.md")
+        doc = Document(Path("test.md"), content)
+        assert rule.fix(doc, config) is None

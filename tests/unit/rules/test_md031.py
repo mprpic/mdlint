@@ -303,3 +303,44 @@ class TestMD031:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result is None
+
+    def test_blockquote_marker_lines_count_as_blank(self, rule: MD031, config: MD031Config) -> None:
+        """A line holding only `>` separates a fence inside a blockquote."""
+        content = load_fixture("md031", "blockquote_separators.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_comment_line_counts_as_blank(self, rule: MD031, config: MD031Config) -> None:
+        """A directive comment directly above a fence does not need its own blank line."""
+        content = load_fixture("md031", "comment_above.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_fence_after_bare_list_marker(self, rule: MD031, config: MD031Config) -> None:
+        """A fence opening a list item whose marker is alone on the line above is valid."""
+        content = load_fixture("md031", "bare_list_marker.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None
+
+    def test_fix_blockquote_inserts_quote_marker(self, rule: MD031, config: MD031Config) -> None:
+        """Blank lines inserted inside a blockquote keep the `>` marker."""
+        content = load_fixture("md031", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+        assert len(rule.check(doc, config)) == 2
+        result = rule.fix(doc, config)
+        assert result == "> Text\n>\n> ```sh\n> x\n> ```\n>\n> Text\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_unclosed_fence_needs_no_blank_line_below(
+        self, rule: MD031, config: MD031Config
+    ) -> None:
+        """An unclosed fence ends with its container, so no blank line is wanted below it."""
+        content = load_fixture("md031", "unclosed_fence_in_list_item.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert rule.fix(doc, config) is None

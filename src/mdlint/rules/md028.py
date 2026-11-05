@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from mdlint.document import Document
@@ -21,7 +22,12 @@ class MD028(Rule[MD028Config]):
     description = (
         "This rule detects when two blockquote sections are separated only by "
         "blank lines, without any intervening text. This creates ambiguous "
-        "Markdown that may be parsed differently by different implementations."
+        "Markdown that may be parsed differently by different implementations.\n\n"
+        "The fix merges the two blockquotes by putting a `>` marker on the blank "
+        "line. It leaves the blank line alone when the second blockquote is a "
+        "GitHub alert (it starts with a marker such as `[!NOTE]` or `[!WARNING]`), "
+        "because merging would turn the alert marker into plain text inside the "
+        "first blockquote."
     )
 
     rationale = (
@@ -48,16 +54,22 @@ And Jimmy also said:
 > in some parsers, these are treated as the same blockquote.
 """
 
-    def _find_blank_lines_between_blockquotes(self, document: Document) -> list[tuple[int, str]]:
+    # GitHub alert types; the marker must open the blockquote to render as an alert.
+    ALERT_MARKER = re.compile(r"\[!(?:note|tip|important|warning|caution)\]", re.IGNORECASE)
+
+    def _find_blank_lines_between_blockquotes(
+        self, document: Document
+    ) -> list[tuple[int, str, int]]:
         """Find blank lines that sit between two blockquote sections.
 
-        Returns a list of (line_num, indent) tuples where line_num is the
-        1-indexed blank line number and indent is the leading whitespace
-        of the preceding blockquote line.
+        Returns a list of (line_num, indent, next_quote_line) tuples where
+        line_num is the 1-indexed blank line number, indent is the leading
+        whitespace of the preceding blockquote line, and next_quote_line is
+        the 1-indexed first line of the following blockquote.
         """
         code_lines = document.code_block_lines
         total_lines = len(document.lines)
-        results: list[tuple[int, str]] = []
+        results: list[tuple[int, str, int]] = []
 
         for line_num in range(1, total_lines + 1):
             if line_num in code_lines:
@@ -106,7 +118,7 @@ And Jimmy also said:
                 break
 
             if has_blockquote_after:
-                results.append((line_num, before_indent))
+                results.append((line_num, before_indent, check_line))
 
         return results
 
@@ -122,7 +134,7 @@ And Jimmy also said:
         """
         violations: list[Violation] = []
 
-        for line_num, _ in self._find_blank_lines_between_blockquotes(document):
+        for line_num, _, _ in self._find_blank_lines_between_blockquotes(document):
             violations.append(
                 Violation(
                     line=line_num,
@@ -138,12 +150,22 @@ And Jimmy also said:
 
     def fix(self, document: Document, config: MD028Config) -> str | None:
         """Fix blank lines between blockquotes by adding > marker to continue the blockquote."""
-        gaps = self._find_blank_lines_between_blockquotes(document)
+        gaps = [
+            gap
+            for gap in self._find_blank_lines_between_blockquotes(document)
+            if not self._starts_alert(document, gap[2])
+        ]
         if not gaps:
             return None
 
         lines = document.content.split("\n")
-        for line_num, indent in gaps:
+        for line_num, indent, _ in gaps:
             lines[line_num - 1] = indent + ">"
 
         return "\n".join(lines)
+
+    def _starts_alert(self, document: Document, line_num: int) -> bool:
+        """Whether a blockquote line opens a GitHub alert, which must stay a separate quote."""
+        line = document.get_line(line_num) or ""
+        text = line[len(document.container_prefix(line_num)) :]
+        return self.ALERT_MARKER.match(text) is not None

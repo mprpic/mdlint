@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from mdlint.document import Document
+from mdlint.rules.md028 import MD028, MD028Config
 from mdlint.rules.md032 import MD032, MD032Config
 from tests.conftest import load_fixture
 
@@ -140,6 +141,29 @@ class TestMD032:
 
         assert len(violations) == 0
 
+    def test_blockquote_marker_lines_count_as_blank(self, rule: MD032, config: MD032Config) -> None:
+        """A line holding only `>` separates a list inside a blockquote."""
+        content = load_fixture("md032", "blockquote_separators.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_comment_line_counts_as_blank(self, rule: MD032, config: MD032Config) -> None:
+        """A directive comment directly above a list does not need its own blank line."""
+        content = load_fixture("md032", "comment_above.md")
+        doc = Document(Path("test.md"), content)
+
+        assert rule.check(doc, config) == []
+
+    def test_list_in_blockquote_missing_blanks(self, rule: MD032, config: MD032Config) -> None:
+        """A list inside a blockquote still needs separation from quoted blocks."""
+        content = load_fixture("md032", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [2, 3]
+
 
 class TestMD032Fix:
     @pytest.fixture
@@ -213,3 +237,17 @@ class TestMD032Fix:
         assert result is not None
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    def test_fix_blockquote_inserts_quote_marker(self, rule: MD032, config: MD032Config) -> None:
+        """Blank lines inserted inside a blockquote keep the `>` marker.
+
+        A bare empty line would split the quote, which MD028 then rejoins with `>`,
+        and the next run would insert another empty line.
+        """
+        content = load_fixture("md032", "blockquote_missing_blank.md")
+        doc = Document(Path("test.md"), content)
+        result = rule.fix(doc, config)
+        assert result == "> Text\n>\n> + Item\n> + Item\n>\n> # Heading\n"
+        fixed_doc = Document(Path("test.md"), result)
+        assert rule.fix(fixed_doc, config) is None
+        assert MD028().check(fixed_doc, MD028Config()) == []

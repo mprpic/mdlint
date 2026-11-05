@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from mdlint.document import Document
+from mdlint.document import Document, is_blank_line
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
 
@@ -32,7 +32,12 @@ class MD031(Rule[MD031Config]):
         "fence at the end of a document does not require a blank line below. "
         "Set ``list_items`` to ``false`` to disable this rule for code fences "
         "inside list items. This can be useful when creating tight lists "
-        "containing code fences."
+        "containing code fences.\n\n"
+        "Lines holding only blockquote markers (`>`) or HTML comments count as "
+        "blank, so fences inside blockquotes and fences directly below a "
+        "directive comment are accepted. A fence that opens a list item whose "
+        "marker sits alone on the line above needs no blank line above it, "
+        "because a blank line there would end the list item."
     )
 
     rationale = (
@@ -61,8 +66,12 @@ def hello():
 Some more text here.
 """
 
-    def _get_fences(self, document: Document, config: MD031Config) -> list[tuple[int, int]]:
-        """Return 0-indexed (start, end) ranges for applicable fence tokens."""
+    def _get_fences(self, document: Document, config: MD031Config) -> list[tuple[int, int, bool]]:
+        """Return 0-indexed (start, end, closed) for applicable fence tokens.
+
+        An unclosed fence runs to the end of its container, so a blank line "below" it would
+        land inside the code; such fences only need a blank line above.
+        """
         if not config.list_items:
             list_ranges = [
                 (token.map[0], token.map[1])
@@ -72,28 +81,36 @@ Some more text here.
         else:
             list_ranges = []
 
-        fences: list[tuple[int, int]] = []
+        fences: list[tuple[int, int, bool]] = []
         for token in document.tokens:
             if token.type == "fence" and token.map:
                 if not config.list_items and any(
                     start <= token.map[0] < end for start, end in list_ranges
                 ):
                     continue
-                fences.append((token.map[0], token.map[1]))
+                last = token.map[1]  # 1-indexed number of the fence's last line
+                closing = (document.get_line(last) or "")[len(document.container_prefix(last)) :]
+                closing = closing.strip()
+                closed = (
+                    last > token.map[0] + 1
+                    and len(closing) >= len(token.markup)
+                    and closing == token.markup[0] * len(closing)
+                )
+                fences.append((token.map[0], token.map[1], closed))
         return fences
 
     def check(self, document: Document, config: MD031Config) -> list[Violation]:
         """Check for blanks-around-fences violations."""
         violations: list[Violation] = []
 
-        for fence_start, fence_end in self._get_fences(document, config):
+        for fence_start, fence_end, closed in self._get_fences(document, config):
             fence_start_line = fence_start + 1  # 1-indexed
             fence_end_line = fence_end  # exclusive, so last line is map[1]
 
             # Check blank line above
-            if fence_start_line > 1:
+            if fence_start_line > 1 and not _follows_bare_list_marker(document, fence_start):
                 line_above = document.get_line(fence_start_line - 1)
-                if line_above is not None and line_above.strip() != "":
+                if line_above is not None and not is_blank_line(line_above):
                     violations.append(
                         Violation(
                             line=fence_start_line,
@@ -106,9 +123,9 @@ Some more text here.
                     )
 
             # Check blank line below
-            if fence_end_line < len(document.lines):
+            if closed and fence_end_line < len(document.lines):
                 line_below = document.get_line(fence_end_line + 1)
-                if line_below is not None and line_below.strip() != "":
+                if line_below is not None and not is_blank_line(line_below):
                     violations.append(
                         Violation(
                             line=fence_end_line,
@@ -134,23 +151,55 @@ Some more text here.
         changed = False
 
         # Process fences from bottom to top so insertions don't shift indices
-        for fence_start, fence_end in reversed(fences):
+        for fence_start, fence_end, closed in reversed(fences):
             # fence_start is 0-indexed line of opening fence
             # fence_end is 0-indexed exclusive end (first line after closing fence)
 
             # Fix blank line below
-            if fence_end < num_doc_lines:
-                if lines[fence_end].strip() != "":
-                    lines.insert(fence_end, "")
+            if closed and fence_end < num_doc_lines:
+                if not is_blank_line(lines[fence_end]):
+                    lines.insert(fence_end, _blank_between(document, fence_end, fence_end + 1))
                     changed = True
 
             # Fix blank line above
-            if fence_start > 0:
-                if lines[fence_start - 1].strip() != "":
-                    lines.insert(fence_start, "")
+            if fence_start > 0 and not _follows_bare_list_marker(document, fence_start):
+                if not is_blank_line(lines[fence_start - 1]):
+                    blank = _blank_between(document, fence_start, fence_start + 1)
+                    lines.insert(fence_start, blank)
                     changed = True
 
         if not changed:
             return None
 
         return "\n".join(lines)
+
+
+def _blank_between(document: Document, above: int, below: int) -> str:
+    """Blank line to insert between two 1-indexed lines without splitting a blockquote.
+
+    An empty line would end a quote that both lines are in, so inside one this is the
+    ``>`` marker. The shallower side wins, so a blank line next to a quote that starts or
+    ends there is not itself quoted.
+    """
+    candidates = (document.blank_container_line(above), document.blank_container_line(below))
+    return min(candidates, key=lambda text: text.count(">"))
+
+
+def _follows_bare_list_marker(document: Document, start: int) -> bool:
+    """Whether a block starting at 0-indexed line `start` opens a bare list item.
+
+    A list item can begin with at most one blank line, so after a marker that sits alone
+    on its line a blank line would end the item and push the block out of the list.
+    """
+    marker_line = document.get_line(start)
+    if marker_line is None or is_blank_line(marker_line):
+        return False  # the usual case, decided without scanning every token
+    if marker_line[len(document.container_prefix(start)) :].strip():
+        return False
+    return any(
+        token.type == "list_item_open"
+        and token.map is not None
+        and token.map[0] == start - 1
+        and token.map[1] > start
+        for token in document.tokens
+    )
