@@ -179,14 +179,34 @@ class TestMD030:
         assert len(violations) == 0
 
     def test_blockquoted_list(self, rule: MD030, config: MD030Config) -> None:
-        """Lists inside blockquotes are not checked (known limitation)."""
+        """Lists inside blockquotes are checked, with or without a space after '>'."""
         content = load_fixture("md030", "blockquoted_list.md")
         doc = Document(Path("blockquoted_list.md"), content)
 
         violations = rule.check(doc, config)
 
-        # Blockquoted list lines start with "> " so the regex doesn't match
-        assert len(violations) == 0
+        assert [(v.line, v.column) for v in violations] == [(1, 4), (2, 4), (4, 4), (6, 3)]
+        assert all("found 2" in v.message for v in violations)
+
+    def test_paren_marker(self, rule: MD030, config: MD030Config) -> None:
+        """Ordered list items with ')' delimiters are checked."""
+        content = load_fixture("md030", "paren_marker.md")
+        doc = Document(Path("paren_marker.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [(1, 3), (2, 3)]
+
+    def test_blockquoted_multi_paragraph(self, rule: MD030) -> None:
+        """Multi-paragraph items inside blockquotes use the multi-paragraph setting."""
+        content = load_fixture("md030", "blockquoted_multi_paragraph.md")
+        doc = Document(Path("blockquoted_multi_paragraph.md"), content)
+        config = MD030Config(ol_multi=2)
+
+        violations = rule.check(doc, config)
+
+        assert [v.line for v in violations] == [1, 5]
+        assert all("Expected 2 spaces" in v.message for v in violations)
 
     def test_fix_corrects_invalid(self, rule: MD030, config: MD030Config) -> None:
         """Fix adjusts spaces after list markers to match expected count."""
@@ -196,6 +216,48 @@ class TestMD030:
         assert result is not None
         fixed_doc = Document(Path("test.md"), result)
         assert rule.check(fixed_doc, config) == []
+
+    def test_fix_preserves_final_newline(self, rule: MD030, config: MD030Config) -> None:
+        """Fix keeps the file's trailing newline."""
+        content = load_fixture("md030", "invalid.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith("2. Second item with three spaces\n")
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_blockquoted_list(self, rule: MD030, config: MD030Config) -> None:
+        """Fix adjusts spacing inside blockquotes and keeps the quote markers."""
+        content = load_fixture("md030", "blockquoted_list.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result == "> - Item one\n> - Item two\n\n>1. Item\n\n>+ Item\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_paren_marker(self, rule: MD030, config: MD030Config) -> None:
+        """Fix works with ')' ordered list delimiters."""
+        content = load_fixture("md030", "paren_marker.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result == "1) Item one\n2) Item two\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_blockquoted_multi_paragraph(self, rule: MD030) -> None:
+        """Fix moves continuation paragraphs inside a blockquote along with the marker."""
+        content = load_fixture("md030", "blockquoted_multi_paragraph.md")
+        doc = Document(Path("test.md"), content)
+        config = MD030Config(ol_multi=2)
+
+        result = rule.fix(doc, config)
+
+        assert result == "> 1)  First item\n>\n>     Second paragraph\n>\n> 2)  Second item\n"
+        assert rule.fix(Document(Path("test.md"), result), config) is None
 
     def test_fix_returns_none_for_valid(self, rule: MD030, config: MD030Config) -> None:
         """Fix returns None when document is already valid."""

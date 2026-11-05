@@ -226,6 +226,32 @@ class TestMD029:
 
         assert len(violations) == 0
 
+    def test_blockquoted_lists(self, rule: MD029) -> None:
+        """Lists inside blockquotes are checked like top-level lists."""
+        config = MD029Config()
+        content = load_fixture("md029", "blockquote.md")
+        doc = Document(Path("blockquote.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.message) for v in violations] == [
+            (5, "Ordered list item prefix: expected 1, found 3"),
+            (11, "Ordered list item prefix: expected 3, found 4"),
+            (15, "Ordered list item prefix: expected 3, found 5"),
+        ]
+
+    def test_list_starting_on_parent_line(self, rule: MD029) -> None:
+        """An item sharing its line with the parent item's marker is part of the list."""
+        config = MD029Config()
+        content = load_fixture("md029", "same_line_nested.md")
+        doc = Document(Path("same_line_nested.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.message) for v in violations] == [
+            (5, "Ordered list item prefix: expected 3, found 4"),
+        ]
+
     def test_default_style_is_one_or_ordered(self) -> None:
         """Default config uses one_or_ordered style."""
         config = MD029Config()
@@ -479,6 +505,43 @@ class TestMD029Fix:
 
         assert result is not None
         assert result.endswith(" 1. Item\n 1. Item\n 1. Item\n 1. Item\n")
+
+    def test_fix_blockquoted_lists(self, rule: MD029) -> None:
+        """Fix renumbers items inside blockquotes and keeps the quote markers."""
+        config = MD029Config()
+        content = load_fixture("md029", "blockquote.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result == (
+            content.replace("> 3. Three", "> 1. Three")
+            .replace("> 4) Fourth", "> 3) Fourth")
+            .replace(">5. Tight", ">3. Tight")
+        )
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_list_starting_on_parent_line(self, rule: MD029) -> None:
+        """Fix renumbers an item whose list starts on the parent item's line."""
+        config = MD029Config()
+        content = load_fixture("md029", "same_line_nested.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result is not None
+        assert result.endswith("- 1. First\n  2. Second\n  3. Fourth\n")
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+
+    def test_fix_renumbers_both_items_on_one_line(self, rule: MD029) -> None:
+        """Fix renumbers a parent and a child item that share a line."""
+        config = MD029Config(style="one")
+        doc = Document(Path("test.md"), "10. 3. a\n9. b\n")
+
+        result = rule.fix(doc, config)
+
+        assert result == "1. 1. a\n1. b\n"
 
     def test_fixable_property(self, rule: MD029) -> None:
         """Rule reports as fixable."""

@@ -1,9 +1,11 @@
-import re
 from dataclasses import dataclass, field
 from typing import Literal, NamedTuple
 
+from markdown_it.token import Token
+
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
+from mdlint.rules.md030 import find_list_marker
 from mdlint.violation import Violation
 
 
@@ -13,6 +15,7 @@ class _ListItem(NamedTuple):
     number: int
     line: int
     digits: str
+    start: int  # offset of the digits in the line
     content_column: int
 
 
@@ -59,9 +62,6 @@ class MD029(Rule[MD029Config]):
         "Fixes preserve that alignment."
     )
 
-    # An ordered list item prefix: indent, digits, marker, and trailing space
-    PREFIX_PATTERN = re.compile(r"\s*(?P<digits>\d+)[.)](?:\s+|$)")
-
     rationale = (
         "Consistent formatting makes it easier to understand a document. "
         "Using '1.' for all items simplifies reordering since items can be "
@@ -92,6 +92,7 @@ class MD029(Rule[MD029Config]):
 
         # Track list contexts: each list gets its own numbering check
         list_stack: list[dict] = []
+        open_items: list[int] = []  # first lines of the enclosing list items
 
         for token in document.tokens:
             if token.type == "ordered_list_open":
@@ -101,12 +102,15 @@ class MD029(Rule[MD029Config]):
                     ctx = list_stack.pop()
                     if style == "one_or_ordered":
                         violations.extend(self._check_one_or_ordered(ctx["items"]))
-            elif token.type == "list_item_open" and list_stack:
-                line = token.map[0] + 1 if token.map else 1
-                line_content = document.get_line(line)
-                actual_prefix = self._extract_prefix(line_content)
-
-                if actual_prefix is not None:
+            elif token.type == "list_item_close":
+                open_items.pop()
+            elif token.type == "list_item_open" and token.map:
+                line = token.map[0] + 1
+                item = self._parse_item(document, token, line, open_items.count(line))
+                open_items.append(line)
+                if item is not None and list_stack:
+                    actual_prefix = item.number
+                    line_content = document.get_line(line)
                     ctx = list_stack[-1]
                     ctx["items"].append((actual_prefix, line, line_content))
                     item_index = len(ctx["items"])
@@ -187,6 +191,7 @@ class MD029(Rule[MD029Config]):
         # Collect list info using the same token traversal as check()
         lists: list[list[_ListItem]] = []
         list_stack: list[list[_ListItem]] = []
+        open_items: list[int] = []  # first lines of the enclosing list items
 
         for token in document.tokens:
             if token.type == "ordered_list_open":
@@ -194,13 +199,16 @@ class MD029(Rule[MD029Config]):
             elif token.type == "ordered_list_close":
                 if list_stack:
                     lists.append(list_stack.pop())
-            elif token.type == "list_item_open" and list_stack:
-                line = token.map[0] + 1 if token.map else 1
-                item = self._parse_item(document.get_line(line), line)
-                if item is not None:
+            elif token.type == "list_item_close":
+                open_items.pop()
+            elif token.type == "list_item_open" and token.map:
+                line = token.map[0] + 1
+                item = self._parse_item(document, token, line, open_items.count(line))
+                open_items.append(line)
+                if item is not None and list_stack:
                     list_stack[-1].append(item)
 
-        replacements: dict[int, str] = {}  # line -> replacement digits
+        replacements: list[tuple[_ListItem, str]] = []
 
         for items in lists:
             if not items:
@@ -230,44 +238,44 @@ class MD029(Rule[MD029Config]):
             padding = self._alignment_padding(items)
             for item, expected in zip(items, expected_numbers):
                 if item.number != expected:
-                    replacements[item.line] = self._render_digits(item, expected, padding)
+                    replacements.append((item, self._render_digits(item, expected, padding)))
 
         if not replacements:
             return None
 
         lines = document.content.split("\n")
-        for line_num, new_digits in replacements.items():
-            line_idx = line_num - 1
-            line = lines[line_idx]
-            stripped = line.lstrip()
-            indent = line[: len(line) - len(stripped)]
-            # Replace the numeric prefix (digits followed by . or ))
-            i = 0
-            while i < len(stripped) and stripped[i].isdigit():
-                i += 1
-            if i > 0 and i < len(stripped) and stripped[i] in ".)":
-                lines[line_idx] = indent + new_digits + stripped[i:]
+        # Right to left, so a renumbered parent cannot move a child's digits on the same line.
+        for item, new_digits in sorted(
+            replacements, key=lambda r: (r[0].line, r[0].start), reverse=True
+        ):
+            line = lines[item.line - 1]
+            end = item.start + len(item.digits)
+            lines[item.line - 1] = line[: item.start] + new_digits + line[end:]
 
         return "\n".join(lines)
 
-    @classmethod
-    def _extract_prefix(cls, line: str | None) -> int | None:
-        """Extract the numeric prefix from an ordered list item line."""
-        if line is None:
-            return None
-        match = cls.PREFIX_PATTERN.match(line)
-        return int(match.group("digits")) if match else None
+    @staticmethod
+    def _parse_item(
+        document: Document, token: Token, line: int, outer_items: int
+    ) -> _ListItem | None:
+        """Parse an ordered list item's prefix as written in the source.
 
-    @classmethod
-    def _parse_item(cls, line_content: str | None, line: int) -> _ListItem | None:
-        """Parse an ordered list item line into its prefix components."""
-        if line_content is None:
+        Args:
+            document: The document being checked.
+            token: A ``list_item_open`` token.
+            line: The item's first line.
+            outer_items: How many enclosing list items open on the same line.
+
+        Returns:
+            The item's prefix, or None for bullet items and items whose marker is not found.
+        """
+        line_content = document.get_line(line)
+        if token.markup not in (".", ")") or line_content is None:
             return None
-        match = cls.PREFIX_PATTERN.match(line_content)
+        match = find_list_marker(line_content, token, outer_items)
         if match is None:
             return None
-        digits = match.group("digits")
-        return _ListItem(int(digits), line, digits, match.end() + 1)
+        return _ListItem(int(token.info), line, token.info, match.start("marker"), match.end() + 1)
 
     @staticmethod
     def _alignment_padding(items: list[_ListItem]) -> str | None:

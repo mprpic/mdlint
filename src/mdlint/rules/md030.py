@@ -1,10 +1,46 @@
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import NamedTuple
+
+from markdown_it.token import Token
 
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
 from mdlint.violation import Violation
+
+# One piece of the container syntax in front of a list item's content: a blockquote marker,
+# or a list marker with the whitespace after it.
+_CONTAINER_MARKER = re.compile(r"[ \t]*(?:>|(?P<marker>\d{1,9}[.)]|[-+*])(?P<space>[ \t]+|$))")
+_QUOTE_MARKER = re.compile(r"[ \t]*>")
+
+
+def find_list_marker(line: str, token: Token, outer_items: int) -> re.Match[str] | None:
+    """Locate a list item's marker on the item's first line.
+
+    ``Document.container_prefix`` covers the item's own marker as well and stops early on
+    tab-indented lines, so it cannot say where the marker is. Everything in front of the
+    marker is container syntax, though: ``>`` markers, indentation, and the markers of
+    enclosing items that open on the same line. Skipping ``outer_items`` list markers
+    therefore lands on this item's marker, which is then confirmed against the token.
+
+    Args:
+        line: The item's first line.
+        token: The item's ``list_item_open`` token.
+        outer_items: How many enclosing list items open on the same line.
+
+    Returns:
+        A match with the marker in its ``marker`` group and the whitespace after it in its
+        ``space`` group, or None if the marker is not where the token says it is.
+    """
+    pos = 0
+    while match := _CONTAINER_MARKER.match(line, pos):
+        if match.group("marker") is not None:
+            if outer_items == 0:
+                return match if match.group("marker") == token.info + token.markup else None
+            outer_items -= 1
+        pos = match.end()
+    return None
 
 
 @dataclass
@@ -37,6 +73,18 @@ class MD030Config(RuleConfig):
     )
 
 
+class _MarkerSpacing(NamedTuple):
+    """A list item whose marker is followed by the wrong number of spaces."""
+
+    token: Token
+    line: int
+    end_line: int  # last line of the item
+    match: re.Match[str]
+    expected: int
+    outer_items: int  # enclosing list items that open on the item's first line
+    quotes: int  # enclosing blockquotes
+
+
 class MD030(Rule[MD030Config]):
     """Spaces after list markers."""
 
@@ -47,7 +95,8 @@ class MD030(Rule[MD030Config]):
 
     description = (
         "This rule checks the number of spaces between list markers "
-        "(such as -, *, +, or 1.) and the text of list items. It supports "
+        "(such as `-`, `*`, `+`, `1.`, or `1)`) and the text of list items, "
+        "including lists inside blockquotes. It supports "
         "different spacing requirements for single-paragraph and "
         "multi-paragraph list items."
     )
@@ -81,17 +130,15 @@ class MD030(Rule[MD030Config]):
 2.   Second item with three spaces
 """
 
-    # Regex patterns for extracting spaces after list markers
-    UL_PATTERN = re.compile(r"^(\s*)([*+-])(\s+)")
-    OL_PATTERN = re.compile(r"^(\s*)(\d+\.)(\s+)")
-
     def _iter_violating_items(
         self, document: Document, config: MD030Config
-    ) -> Iterator[tuple[int, str, int, re.Pattern, re.Match, int]]:
-        """Yield violating items as (line_num, line_content, expected, pattern, match, end)."""
+    ) -> Iterator[_MarkerSpacing]:
+        """Yield the list items whose marker spacing does not match the configuration."""
         list_stack: list[tuple[str, bool]] = []
         list_info: dict[int, bool] = {}
         self._analyze_lists(document.tokens, list_info)
+        open_items: list[int] = []  # first lines of the enclosing list items
+        quotes = 0
 
         for token_index, token in enumerate(document.tokens):
             if token.type == "bullet_list_open":
@@ -103,13 +150,20 @@ class MD030(Rule[MD030Config]):
             elif token.type in ("bullet_list_close", "ordered_list_close"):
                 if list_stack:
                     list_stack.pop()
+            elif token.type == "blockquote_open":
+                quotes += 1
+            elif token.type == "blockquote_close":
+                quotes -= 1
+            elif token.type == "list_item_close":
+                open_items.pop()
             elif token.type == "list_item_open" and token.map:
+                line_num = token.map[0] + 1
+                outer_items = open_items.count(line_num)
+                open_items.append(line_num)
                 if not list_stack:
                     continue
 
                 list_type, is_multi = list_stack[-1]
-                line_num = token.map[0] + 1
-                item_end_line = token.map[1]
                 line_content = document.get_line(line_num)
 
                 if line_content is None:
@@ -117,36 +171,34 @@ class MD030(Rule[MD030Config]):
 
                 if list_type == "ul":
                     expected_spaces = config.ul_multi if is_multi else config.ul_single
-                    pattern = self.UL_PATTERN
                 else:
                     expected_spaces = config.ol_multi if is_multi else config.ol_single
-                    pattern = self.OL_PATTERN
 
-                match = pattern.match(line_content)
-                if match and len(match.group(3)) != expected_spaces:
-                    yield line_num, line_content, expected_spaces, pattern, match, item_end_line
+                match = find_list_marker(line_content, token, outer_items)
+                # An empty item's marker can end the line; there is no spacing to check.
+                if match and match.group("space") and len(match.group("space")) != expected_spaces:
+                    yield _MarkerSpacing(
+                        token, line_num, token.map[1], match, expected_spaces, outer_items, quotes
+                    )
 
     def check(self, document: Document, config: MD030Config) -> list[Violation]:
         """Check for list marker spacing violations."""
         violations: list[Violation] = []
 
-        for line_num, line_content, expected_spaces, _, match, _end in self._iter_violating_items(
-            document, config
-        ):
-            actual_spaces = len(match.group(3))
-            marker_end = match.end(2)
+        for item in self._iter_violating_items(document, config):
+            actual_spaces = len(item.match.group("space"))
             violations.append(
                 Violation(
-                    line=line_num,
-                    column=marker_end + 1,
+                    line=item.line,
+                    column=item.match.end("marker") + 1,
                     rule_id=self.id,
                     rule_name=self.name,
                     message=(
-                        f"Expected {expected_spaces} "
-                        f"space{'s' if expected_spaces != 1 else ''} "
+                        f"Expected {item.expected} "
+                        f"space{'s' if item.expected != 1 else ''} "
                         f"after list marker, found {actual_spaces}"
                     ),
-                    context=line_content,
+                    context=document.get_line(item.line),
                 )
             )
 
@@ -158,31 +210,45 @@ class MD030(Rule[MD030Config]):
         if not items_to_fix:
             return None
 
-        lines = list(document.lines)
-        for line_num, _, expected_spaces, pattern, _match, item_end_line in items_to_fix:
-            line = lines[line_num - 1]
-            match = pattern.match(line)
+        lines = document.content.split("\n")
+        for item in items_to_fix:
+            line = lines[item.line - 1]
+            # Fixing an enclosing item may have shifted this line, so find the marker again.
+            match = find_list_marker(line, item.token, item.outer_items)
             if not match:
                 continue
-            actual_spaces = len(match.group(3))
-            delta = expected_spaces - actual_spaces
-            indent = match.group(1)
-            marker = match.group(2)
-            lines[line_num - 1] = indent + marker + " " * expected_spaces + line[match.end(3) :]
+            delta = item.expected - len(match.group("space"))
+            lines[item.line - 1] = (
+                line[: match.end("marker")] + " " * item.expected + line[match.end("space") :]
+            )
 
             # Adjust indentation of continuation lines within this list item
             if delta != 0:
-                for i in range(line_num, item_end_line):
-                    cont_line = lines[i]
-                    if not cont_line.strip():
-                        continue
-                    if delta > 0:
-                        lines[i] = " " * delta + cont_line
-                    else:
-                        remove = min(-delta, len(cont_line) - len(cont_line.lstrip()))
-                        lines[i] = cont_line[remove:]
+                for i in range(item.line, item.end_line):
+                    lines[i] = self._shift_continuation(lines[i], item.quotes, delta)
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _shift_continuation(line: str, quotes: int, delta: int) -> str:
+        """Move a continuation line's content by delta columns to follow its item's marker.
+
+        The shift happens after the enclosing blockquote markers, since moving the ``>``
+        itself would take the line out of its quote.
+        """
+        pos = 0
+        for _ in range(quotes):
+            match = _QUOTE_MARKER.match(line, pos)
+            if match is None:
+                return line  # a lazy continuation line, whose indentation has no meaning
+            pos = match.end()
+        rest = line[pos:]
+        if not rest.strip():
+            return line
+        if delta > 0:
+            return line[:pos] + " " * delta + rest
+        remove = min(-delta, len(rest) - len(rest.lstrip()))
+        return line[:pos] + rest[remove:]
 
     @staticmethod
     def _analyze_lists(tokens: list, list_info: dict[int, bool]) -> None:
