@@ -363,3 +363,47 @@ Some text:
         doc = Document(Path("test.md"), content)
         result = rule.fix(doc, config)
         assert result == "<b><https://example.com></b>"
+
+    def test_url_boundaries(self, rule: MD034, config: MD034Config) -> None:
+        """Emphasis markers, mailto: and user info are split from or kept in the URL correctly."""
+        content = load_fixture("md034", "url_boundaries.md")
+        doc = Document(Path("url_boundaries.md"), content)
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column, v.message) for v in violations] == [
+            (3, 9, "Bare URL used: https://example.com"),
+            (5, 6, "Bare URL used: mailto:user@example.com"),
+            (9, 5, "Bare URL used: https://user@example.com/x"),
+        ]
+
+    def test_fix_url_boundaries(self, rule: MD034, config: MD034Config) -> None:
+        """Fix wraps exactly the URL, once, without breaking emphasis or schemes."""
+        content = load_fixture("md034", "url_boundaries.md")
+
+        result = _fix_idempotent(rule, config, content)
+
+        assert result is not None
+        assert result.splitlines()[2::2] == [
+            "Visit **<https://example.com>** now.",
+            "Mail <mailto:user@example.com> now.",
+            "Clone ssh://git@github.com/x now.",
+            "See <https://user@example.com/x> now.",
+            "See https://. now.",
+        ]
+
+    def test_non_text_contexts_ignored(self, rule: MD034, config: MD034Config) -> None:
+        """URLs that are not rendered as Markdown text, or are already linked, are not flagged."""
+        content = load_fixture("md034", "non_text_contexts.md")
+        doc = Document(Path("non_text_contexts.md"), content)
+
+        assert rule.check(doc, config) == []
+        assert _fix_idempotent(rule, config, content) is None
+
+
+def _fix_idempotent(rule: MD034, config: MD034Config, content: str) -> str | None:
+    """Fix content and assert that fixing the result again changes nothing."""
+    result = rule.fix(Document(Path("test.md"), content), config)
+    if result is not None:
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+    return result

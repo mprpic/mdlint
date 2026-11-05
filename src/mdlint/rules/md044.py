@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from mdlint.document import Document
 from mdlint.rules.base import Rule, RuleConfig
+from mdlint.rules.md034 import MD034
 from mdlint.violation import Violation
 
 
@@ -16,7 +17,7 @@ class MD044Config(RuleConfig):
         metadata={"description": "List of proper names with correct capitalization."},
     )
     code_blocks: bool = field(
-        default=True,
+        default=False,
         metadata={"description": "Whether to check inside code blocks and inline code."},
     )
     html_elements: bool = field(
@@ -39,7 +40,11 @@ class MD044(Rule[MD044Config]):
         "capitalization is specified in the `names` configuration option. For example:\n\n"
         "```\n"
         'names = ["JavaScript", "Github", "Python"]\n'
-        "```"
+        "```\n\n"
+        "Code blocks and inline code are skipped unless `code_blocks` is enabled. "
+        "URLs, email addresses, link destinations, reference labels, and names "
+        "right after a dot (as in `config.toml` or `www.github.com`) are never "
+        "checked, so fixes cannot break links or file names."
     )
 
     rationale = (
@@ -72,6 +77,13 @@ We also use github and python with improper capitalization.
 - python is powerful
 """
 
+    # Inline link and image destinations, full reference labels ("][label]"), and autolinks
+    LINK_TARGET_PATTERN = re.compile(
+        r"\]\((?:<[^>]*>|[^\s)]*)"
+        r"|\]\[[^\]]*\]"
+        r"|<[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*>"
+    )
+
     def _find_name_mismatches(
         self, document: Document, config: MD044Config
     ) -> Iterator[tuple[int, int, str, str]]:
@@ -91,7 +103,8 @@ We also use github and python with improper capitalization.
         name_patterns: list[tuple[str, re.Pattern[str]]] = []
         for name in names:
             escaped_name = re.escape(name)
-            start = r"\b_*" if re.match(r"^\w", name) else ""
+            # Not right after a dot, where the name is a file extension or part of a domain
+            start = r"(?<!\.)\b_*" if re.match(r"^\w", name) else ""
             end = r"_*\b" if re.match(r".*\w$", name) else ""
             pattern = f"({start})({escaped_name})({end})"
             name_patterns.append((name, re.compile(pattern, re.IGNORECASE)))
@@ -131,29 +144,14 @@ We also use github and python with improper capitalization.
             for ln in range(token.map[0] + 1, token.map[1] + 1):
                 scannable_lines.add(ln)
 
-            # Detect autolinks and link URLs to exclude from scanning
-            current_line = token.map[0] + 1
-            for child in token.children:
-                if child.type in ("softbreak", "hardbreak"):
-                    current_line += 1
-                elif child.type == "link_open":
-                    href = child.attrs.get("href", "")
-                    if not href:
-                        continue
-                    source = document.get_line(current_line) or ""
-                    if child.markup == "autolink":
-                        # Autolink: <URL>
-                        target = f"<{href}>"
-                    else:
-                        # Regular/image link: ](URL...) — exclude URL portion
-                        target = f"]({href}"
-                    idx = source.find(target)
-                    if idx >= 0:
-                        # Find the closing delimiter to get full exclusion range
-                        close_char = ">" if child.markup == "autolink" else ")"
-                        close_idx = source.find(close_char, idx + len(target))
-                        end = (close_idx + 2) if close_idx >= 0 else (idx + len(target) + 1)
-                        exclusion_ranges.setdefault(current_line, []).append((idx + 1, end))
+            # Link targets are not shown, and rewriting a destination changes where it points
+            if any(child.type in ("link_open", "image") for child in token.children):
+                for ln in range(token.map[0] + 1, token.map[1] + 1):
+                    source = document.get_line(ln) or ""
+                    exclusion_ranges.setdefault(ln, []).extend(
+                        (match.start() + 1, match.end() + 1)
+                        for match in self.LINK_TARGET_PATTERN.finditer(source)
+                    )
 
         # Build inline code exclusion when code_blocks is disabled
         code_span_positions: dict[int, set[int]] = {}
@@ -168,7 +166,9 @@ We also use github and python with improper capitalization.
             if not line:
                 continue
 
-            exclusions = exclusion_ranges.get(line_num, [])
+            exclusions = exclusion_ranges.get(line_num, []) + [
+                (start + 1, end + 1) for start, end in MD034.find_urls(line)
+            ]
             line_code_cols = code_span_positions.get(line_num, set())
             line_matched = matched_ranges.setdefault(line_num, [])
 

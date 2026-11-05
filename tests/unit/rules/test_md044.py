@@ -70,10 +70,10 @@ class TestMD044:
         assert len(violations) == 3
 
     def test_code_blocks_excluded_by_default(self, rule: MD044) -> None:
-        """Code blocks are excluded by default when code_blocks=False."""
+        """Code blocks and inline code are excluded by default."""
         content = load_fixture("md044", "code_blocks.md")
         doc = Document(Path("code_blocks.md"), content)
-        config = MD044Config(names=["JavaScript"], code_blocks=False)
+        config = MD044Config(names=["JavaScript"])
 
         violations = rule.check(doc, config)
 
@@ -168,7 +168,7 @@ class TestMD044:
         config = MD044Config()
 
         assert config.names == []
-        assert config.code_blocks is True
+        assert config.code_blocks is False
         assert config.html_elements is True
 
     def test_violation_context(self, rule: MD044) -> None:
@@ -321,3 +321,37 @@ Check out [javascript][1] for more.
         config = MD044Config(names=["github.com"])
         result = rule.fix(doc, config)
         assert result == "Visit github.com for more info."
+
+    def test_urls_and_files_excluded(self, rule: MD044) -> None:
+        """URLs, link destinations, reference labels and file extensions are not checked."""
+        content = load_fixture("md044", "urls_and_files.md")
+        doc = Document(Path("urls_and_files.md"), content)
+        config = MD044Config(names=["GitHub", "TOML"])
+
+        violations = rule.check(doc, config)
+
+        assert [(v.line, v.column) for v in violations] == [(3, 5)]
+
+    def test_fix_leaves_urls_and_files(self, rule: MD044) -> None:
+        """Fix corrects prose but leaves URLs, labels and file names alone."""
+        content = load_fixture("md044", "urls_and_files.md")
+        config = MD044Config(names=["GitHub", "TOML"])
+
+        result = _fix_idempotent(rule, config, content)
+
+        assert result == content.replace("The github project", "The GitHub project")
+
+    def test_fix_code_blocks_untouched_by_default(self, rule: MD044) -> None:
+        """Fix does not rewrite code with the default configuration."""
+        content = load_fixture("md044", "code_blocks.md")
+        config = MD044Config(names=["JavaScript"])
+
+        assert _fix_idempotent(rule, config, content) is None
+
+
+def _fix_idempotent(rule: MD044, config: MD044Config, content: str) -> str | None:
+    """Fix content and assert that fixing the result again changes nothing."""
+    result = rule.fix(Document(Path("test.md"), content), config)
+    if result is not None:
+        assert rule.fix(Document(Path("test.md"), result), config) is None
+    return result
