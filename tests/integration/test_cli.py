@@ -548,6 +548,7 @@ class TestCLIConfigErrors:
             ('[rules.MD060]\nstyle = "aligned-no-space"\n', "rules.MD060.style: Expected one of"),
             ("[rules.MD999]\nfoo = 1\n", "rules.MD999: Unknown rule"),
             ('select = ["line-lenght"]\n', "select: Unknown rule(s): line-lenght"),
+            ('selct = ["MD001"]\n', "selct: Unknown option"),
             ("[rules.MD013\n", "Invalid TOML"),
         ],
     )

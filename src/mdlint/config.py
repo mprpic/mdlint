@@ -18,6 +18,9 @@ from mdlint.rules.base import RuleConfig
 
 _TYPE_NAMES: dict[Any, str] = {bool: "boolean", int: "integer", str: "string"}
 
+# Every key a config file may hold at its top level (under [tool.mdlint] in pyproject.toml)
+_TOP_LEVEL_KEYS = ("exclude", "ignore", "rules", "select")
+
 
 class ConfigError(Exception):
     """Invalid configuration.
@@ -326,6 +329,11 @@ def load_config(config_path: str | None = None) -> Configuration:
             config_data = parse_inline_config(config_path or "")
         elif source:
             config_data = parse_toml_file(Path(source))
+
+        for key in config_data:
+            if key not in _TOP_LEVEL_KEYS:
+                valid = ", ".join(_TOP_LEVEL_KEYS)
+                raise ConfigError(f"{key}: Unknown option (valid options: {valid})")
 
         rule_configs = build_rule_configs(config_data)
         select = _rule_list(config_data, "select")

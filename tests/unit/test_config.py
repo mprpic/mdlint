@@ -351,6 +351,31 @@ class TestLoadConfigErrors:
         with pytest.raises(ConfigError, match="^<inline>: rules.MD029.style: Expected one of"):
             load_config(config_path="MD029.style='one-or-ordered'")
 
+    def test_unknown_top_level_key(self, tmp_path: Path) -> None:
+        """A misspelled setting must not be ignored, or the config silently does nothing."""
+        config_file = tmp_path / ".mdlint.toml"
+        config_file.write_text('selct = ["MD001"]\n')
+
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(config_path=str(config_file))
+
+        assert str(exc_info.value) == (
+            f"{config_file}: selct: Unknown option (valid options: exclude, ignore, rules, select)"
+        )
+
+    def test_unknown_key_in_pyproject(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "pyproject.toml"
+        config_file.write_text('[tool.mdlint]\nselct = ["MD001"]\n\n[tool.other]\nkey = 1\n')
+
+        with pytest.raises(
+            ConfigError, match=f"^{re.escape(str(config_file))}: selct: Unknown option"
+        ):
+            load_config(config_path=str(config_file))
+
+    def test_unknown_key_in_inline_config(self) -> None:
+        with pytest.raises(ConfigError, match="^<inline>: selct: Unknown option"):
+            load_config(config_path="select = ['MD001']\nselct = ['MD002']")
+
     @pytest.mark.parametrize("key", ["select", "ignore"])
     def test_unknown_rule_in_rule_list(self, tmp_path: Path, key: str) -> None:
         config_file = tmp_path / ".mdlint.toml"
