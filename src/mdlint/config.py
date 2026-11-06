@@ -330,25 +330,36 @@ def load_config(config_path: str | None = None) -> Configuration:
         elif source:
             config_data = parse_toml_file(Path(source))
 
-        for key in config_data:
-            if key not in _TOP_LEVEL_KEYS:
-                valid = ", ".join(_TOP_LEVEL_KEYS)
-                raise ConfigError(f"{key}: Unknown option (valid options: {valid})")
-
-        rule_configs = build_rule_configs(config_data)
-        select = _rule_list(config_data, "select")
-        ignore = _rule_list(config_data, "ignore")
-        exclude = _string_list(config_data, "exclude")
+        return build_configuration(config_data, source)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{source}: Invalid TOML: {e}") from None
     except ConfigError as e:
         raise ConfigError(f"{source}: {e}") from None
 
+
+def build_configuration(config_data: dict, source: str | None = None) -> Configuration:
+    """Validate parsed settings and turn them into a Configuration.
+
+    load_config() uses this for config files and inline TOML, and the docs playground calls
+    it with the TOML typed into the page, so both accept and reject the same settings.
+
+    Args:
+        config_data: Parsed settings, in the shape of a .mdlint.toml file.
+        source: Where the settings came from, recorded on the Configuration.
+
+    Raises:
+        ConfigError: If a key, rule name or option value is invalid.
+    """
+    for key in config_data:
+        if key not in _TOP_LEVEL_KEYS:
+            valid = ", ".join(_TOP_LEVEL_KEYS)
+            raise ConfigError(f"{key}: Unknown option (valid options: {valid})")
+
     return Configuration(
-        rules=rule_configs,
-        select=select,
-        ignore=ignore,
-        exclude=exclude,
+        rules=build_rule_configs(config_data),
+        select=_rule_list(config_data, "select"),
+        ignore=_rule_list(config_data, "ignore"),
+        exclude=_string_list(config_data, "exclude"),
         source=source,
     )
 

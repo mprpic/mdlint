@@ -8,6 +8,7 @@ from mdlint.config import (
     ConfigError,
     Configuration,
     apply_cli_overrides,
+    build_configuration,
     build_rule_configs,
     find_config_file,
     load_config,
@@ -307,6 +308,28 @@ class TestResolveRuleNames:
     def test_unknown_names_raise(self) -> None:
         with pytest.raises(ConfigError, match="^Unknown rule\\(s\\): MD999, nope$"):
             resolve_rule_names(["MD001", "MD999", "nope"])
+
+
+class TestBuildConfiguration:
+    """build_configuration validates parsed settings the way config files are validated."""
+
+    def test_resolves_rule_names(self) -> None:
+        config = build_configuration({"ignore": ["first-line-heading"]})
+
+        assert config.ignore == ["MD041"]
+        assert "MD041" not in config.enabled_rules
+
+    @pytest.mark.parametrize(
+        ("data", "message"),
+        [
+            ({"ignore": "MD041"}, "^ignore: "),
+            ({"selct": ["MD001"]}, "^selct: Unknown option"),
+            ({"rules": {"MD004": {"styel": "dash"}}}, "^rules.MD004.styel: Unknown option"),
+        ],
+    )
+    def test_rejects_invalid_settings(self, data: dict, message: str) -> None:
+        with pytest.raises(ConfigError, match=message):
+            build_configuration(data)
 
 
 class TestLoadConfigErrors:
