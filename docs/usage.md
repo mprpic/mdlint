@@ -26,7 +26,7 @@ mdlint check docs/
 ```
 
 Directories are searched for files ending in `.md`, `.markdown`, `.mdown`, `.mkd` or `.mkdn`. Files named on the
-command line are always linted, whatever their extension.
+command line are linted whatever their extension, unless they match an `exclude` pattern.
 
 Lint from stdin:
 

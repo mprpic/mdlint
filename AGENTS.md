@@ -90,7 +90,8 @@ Uses `markdown-it-py` for token-based parsing. The `Document` class provides:
 - `path`: File path or `<stdin>`
 - `content`: Raw markdown content
 - `tokens`: Parsed markdown-it tokens
-- `lines`: Content split by lines (1-indexed via `get_line()`)
+- `lines`: Content split on `"\n"` only (1-indexed via `get_line()`), matching markdown-it's line numbers and
+  `content.split("\n")` in fixes; `str.splitlines()` would also split at form feeds and Unicode line separators
 - `front_matter`: Extracted YAML/TOML front matter
 - `code_block_lines`: (cached) `set[int]` of 1-indexed line numbers inside fenced/indented code blocks
 - `html_block_lines`: (cached) `set[int]` of 1-indexed line numbers inside HTML blocks
@@ -132,12 +133,16 @@ Only one configuration source is used; settings from different files are never m
 
 CLI rule and file selection flags (`--select`, `--ignore`, `--exclude` and their `--extend-*` variants) apply on top.
 
+`build_configuration()` validates parsed settings and returns the `Configuration`; `load_config()` calls it for files
+and inline TOML, and the docs playground (`docs/assets/playground.js`) calls it with the TOML typed into the page.
+Keep the playground on it so both accept and reject the same settings.
+
 ### File Discovery
 
 Uses the `ignore` library for gitignore-aware file traversal. The `discover_files()` function in `linter.py` handles
 both files and directories, respecting `.gitignore` patterns by default. Directories are searched for files with an
-extension in `MARKDOWN_EXTENSIONS` (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`); files passed explicitly are always
-included.
+extension in `MARKDOWN_EXTENSIONS` (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`); files passed explicitly are
+included whatever their extension, unless they match an `exclude` pattern.
 
 ### Exit Codes
 
@@ -150,6 +155,8 @@ included.
 - Python 3.10+ with type hints
 - Ruff for linting and formatting (see `.ruff.toml` for configuration); `tests/fixtures/` is excluded because the
   fixtures deliberately contain malformed whitespace that ruff would normalize
+- `tests/conftest.py` sets `COLUMNS=80` for every test, so Rich output does not depend on the terminal running the
+  suite; tests about output width pass their own `COLUMNS` through `CliRunner(env=...)`
 - Dataclasses for configuration and data models
 - Abstract base classes for extensibility (Rule)
 - Always use file-level (top-of-file) imports; only use function-level imports if absolutely necessary (e.g., to avoid
