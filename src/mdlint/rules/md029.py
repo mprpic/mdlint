@@ -57,6 +57,10 @@ class MD029(Rule[MD029Config]):
         "starting from 0 or 1, `zero` requires all items use '0.', and "
         "`one_or_ordered` (default) accepts either the 'one' or 'ordered' patterns, "
         "auto-detecting which is in use from the first two items.\n\n"
+        "A list may start at another number, for example to continue an earlier list "
+        "after a paragraph. Its first item is still reported, but the fix leaves it "
+        "alone because it sets the number the rendered list starts at, and the items "
+        "after it are expected to count up from it.\n\n"
         "Prefixes may be zero-padded or space-padded so that list item "
         "content lines up (for example `08.`/`09.`/`10.` or ` 8.`/` 9.`/`10.`). "
         "Fixes preserve that alignment."
@@ -91,17 +95,15 @@ class MD029(Rule[MD029Config]):
         style = config.style
 
         # Track list contexts: each list gets its own numbering check
-        list_stack: list[dict] = []
+        list_stack: list[list[tuple[int, int, str | None]]] = []
         open_items: list[int] = []  # first lines of the enclosing list items
 
         for token in document.tokens:
             if token.type == "ordered_list_open":
-                list_stack.append({"items": [], "ordered_start": 1})
+                list_stack.append([])
             elif token.type == "ordered_list_close":
                 if list_stack:
-                    ctx = list_stack.pop()
-                    if style == "one_or_ordered":
-                        violations.extend(self._check_one_or_ordered(ctx["items"]))
+                    violations.extend(self._check_list(list_stack.pop(), style))
             elif token.type == "list_item_close":
                 open_items.pop()
             elif token.type == "list_item_open" and token.map:
@@ -109,80 +111,47 @@ class MD029(Rule[MD029Config]):
                 item = self._parse_item(document, token, line, open_items.count(line))
                 open_items.append(line)
                 if item is not None and list_stack:
-                    actual_prefix = item.number
-                    line_content = document.get_line(line)
-                    ctx = list_stack[-1]
-                    ctx["items"].append((actual_prefix, line, line_content))
-                    item_index = len(ctx["items"])
+                    list_stack[-1].append((item.number, line, document.get_line(line)))
 
-                    if style != "one_or_ordered":
-                        expected = self._get_expected(style, ctx, item_index, actual_prefix)
-                        if expected is not None and actual_prefix != expected:
-                            violations.append(
-                                Violation(
-                                    line=line,
-                                    column=1,
-                                    rule_id=self.id,
-                                    rule_name=self.name,
-                                    message=(
-                                        f"Ordered list item prefix: "
-                                        f"expected {expected}, found {actual_prefix}"
-                                    ),
-                                    context=line_content,
-                                ),
-                            )
+        return sorted(violations, key=lambda v: v.line)
 
-        return violations
+    @staticmethod
+    def _expected_numbers(style: str, numbers: list[int]) -> list[int]:
+        """Expected prefix of each item of one list.
 
-    def _check_one_or_ordered(self, items: list[tuple[int, int, str]]) -> list[Violation]:
-        """Check items using one_or_ordered auto-detection (matching JS logic).
-
-        Examines the first two items to determine whether the list uses "one"
-        (1/1/1) or "ordered" (1/2/3 or 0/1/2) style, then validates all items.
+        The first item must use the style's starting number, but later items count up from
+        the number it actually has: only that number changes the rendered list (it becomes
+        the list's start), so a list that deliberately starts at 3 is reported once and the
+        fix can leave its start alone.
         """
-        violations: list[Violation] = []
+        first = numbers[0]
+        if style == "one_or_ordered":
+            # Auto-detect the style from the first two items, like markdownlint
+            incrementing = len(numbers) >= 2 and (numbers[1] != 1 or first == 0)
+            style = "ordered" if incrementing else "one"
+        if style == "one":
+            return [1] * len(numbers)
+        if style == "zero":
+            return [0] * len(numbers)
+        return [0 if first == 0 else 1] + [first + i for i in range(1, len(numbers))]
+
+    def _check_list(self, items: list[tuple[int, int, str | None]], style: str) -> list[Violation]:
+        """Report the items of one list whose prefix differs from the expected one."""
         if not items:
-            return violations
-
-        # Determine style based on first two items
-        incrementing = False
-        if len(items) >= 2:
-            first_value = items[0][0]
-            second_value = items[1][0]
-            incrementing = (second_value != 1) or (first_value == 0)
-
-        if incrementing:
-            start = 0 if items[0][0] == 0 else 1
-            for i, (prefix, line, line_content) in enumerate(items):
-                expected = start + i
-                if prefix != expected:
-                    violations.append(
-                        Violation(
-                            line=line,
-                            column=1,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=(
-                                f"Ordered list item prefix: expected {expected}, found {prefix}"
-                            ),
-                            context=line_content,
-                        ),
-                    )
-        else:
-            for prefix, line, line_content in items:
-                if prefix != 1:
-                    violations.append(
-                        Violation(
-                            line=line,
-                            column=1,
-                            rule_id=self.id,
-                            rule_name=self.name,
-                            message=(f"Ordered list item prefix: expected 1, found {prefix}"),
-                            context=line_content,
-                        ),
-                    )
-
-        return violations
+            return []
+        expected_numbers = self._expected_numbers(style, [number for number, _, _ in items])
+        return [
+            Violation(
+                line=line,
+                column=1,
+                rule_id=self.id,
+                rule_name=self.name,
+                message=f"Ordered list item prefix: expected {expected}, found {number}",
+                context=line_content,
+            )
+            for (number, line, line_content), expected in zip(items, expected_numbers)
+            if number != expected
+        ]
 
     def fix(self, document: Document, config: MD029Config) -> str | None:
         """Fix ordered list item prefixes to match the configured style."""
@@ -214,29 +183,10 @@ class MD029(Rule[MD029Config]):
             if not items:
                 continue
 
-            expected_numbers: list[int] = []
-
-            if style == "one":
-                expected_numbers = [1] * len(items)
-            elif style == "zero":
-                expected_numbers = [0] * len(items)
-            elif style == "ordered":
-                start = 0 if items[0].number == 0 else 1
-                expected_numbers = [start + i for i in range(len(items))]
-            elif style == "one_or_ordered":
-                # Auto-detect style from first two items
-                incrementing = False
-                if len(items) >= 2:
-                    incrementing = (items[1].number != 1) or (items[0].number == 0)
-
-                if incrementing:
-                    start = 0 if items[0].number == 0 else 1
-                    expected_numbers = [start + i for i in range(len(items))]
-                else:
-                    expected_numbers = [1] * len(items)
-
+            expected_numbers = self._expected_numbers(style, [item.number for item in items])
             padding = self._alignment_padding(items)
-            for item, expected in zip(items, expected_numbers):
+            # The first number sets where the rendered list starts, so it is never changed.
+            for item, expected in zip(items[1:], expected_numbers[1:]):
                 if item.number != expected:
                     replacements.append((item, self._render_digits(item, expected, padding)))
 
@@ -301,27 +251,3 @@ class MD029(Rule[MD029Config]):
         """Render a replacement prefix, padded to the width of the original."""
         digits = str(expected)
         return digits if padding is None else digits.rjust(len(item.digits), padding)
-
-    @staticmethod
-    def _get_expected(
-        style: str,
-        ctx: dict,
-        item_index: int,
-        actual_prefix: int,
-    ) -> int | None:
-        """Determine the expected prefix value for one/zero/ordered styles."""
-        if style == "one":
-            return 1
-        elif style == "zero":
-            return 0
-        elif style == "ordered":
-            if item_index == 1:
-                if actual_prefix == 0:
-                    ctx["ordered_start"] = 0
-                    return 0
-                else:
-                    ctx["ordered_start"] = 1
-                    return 1
-            else:
-                return ctx["ordered_start"] + item_index - 1
-        return None

@@ -172,18 +172,16 @@ class TestMD029:
         assert "expected 2, found 0" in violations[1].message
 
     def test_one_or_ordered_rejects_arbitrary_start(self, rule: MD029) -> None:
-        """one_or_ordered rejects lists starting with numbers > 1."""
+        """one_or_ordered reports a start above 1, and later items count up from the start."""
         config = MD029Config(style="one_or_ordered")
         content = load_fixture("md029", "arbitrary_start.md")
         doc = Document(Path("arbitrary_start.md"), content)
 
         violations = rule.check(doc, config)
 
-        # Detected as ordered (second item 6 != 1), expects 1/2/3
-        assert len(violations) == 3
+        # Detected as ordered (second item 6 != 1); 6 and 7 follow on from 5
+        assert len(violations) == 1
         assert "expected 1, found 5" in violations[0].message
-        assert "expected 2, found 6" in violations[1].message
-        assert "expected 3, found 7" in violations[2].message
 
     def test_nested_lists(self, rule: MD029) -> None:
         """Nested lists with consistent prefixes."""
@@ -331,7 +329,7 @@ class TestMD029Fix:
         assert rule.check(fixed_doc, config) == []
 
     def test_fix_zero_style_corrects_invalid(self, rule: MD029) -> None:
-        """Fix converts non-zero prefixes to all 0s with zero style."""
+        """Fix converts the prefixes after the first to 0 with zero style."""
         config = MD029Config(style="zero")
         content = load_fixture("md029", "invalid.md")
         doc = Document(Path("test.md"), content)
@@ -339,8 +337,10 @@ class TestMD029Fix:
         result = rule.fix(doc, config)
 
         assert result is not None
+        assert "0. Second item\n0. Third item\n" in result
+        # The first item's 1 sets the rendered start, so it stays and is still reported.
         fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        assert [v.line for v in rule.check(fixed_doc, config)] == [3]
 
     def test_fix_zero_style_returns_none_for_valid(self, rule: MD029) -> None:
         """Fix returns None when content already uses zero style."""
@@ -385,16 +385,30 @@ class TestMD029Fix:
         assert result is None
 
     def test_fix_one_or_ordered_corrects_arbitrary_start(self, rule: MD029) -> None:
-        """Fix corrects arbitrary start numbering with one_or_ordered style."""
+        """Fix leaves a list's start alone, since it changes the rendered numbers."""
         config = MD029Config(style="one_or_ordered")
         content = load_fixture("md029", "arbitrary_start.md")
         doc = Document(Path("test.md"), content)
 
+        assert rule.fix(doc, config) is None
+        assert len(rule.check(doc, config)) == 1
+
+    def test_fix_continued_list_keeps_start(self, rule: MD029) -> None:
+        """A list continued after a paragraph keeps its start; later items follow on from it."""
+        config = MD029Config(style="one_or_ordered")
+        content = load_fixture("md029", "continued_list.md")
+        doc = Document(Path("test.md"), content)
+        assert [(v.line, v.message) for v in rule.check(doc, config)] == [
+            (8, "Ordered list item prefix: expected 1, found 3"),
+            (10, "Ordered list item prefix: expected 5, found 6"),
+        ]
+
         result = rule.fix(doc, config)
 
-        assert result is not None
+        assert result == content.replace("6. Fifth step", "5. Fifth step")
         fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        assert [v.line for v in rule.check(fixed_doc, config)] == [8]
+        assert rule.fix(fixed_doc, config) is None
 
     def test_fix_one_or_ordered_corrects_zero_repeat(self, rule: MD029) -> None:
         """Fix corrects 0/0/0 to 0/1/2 with one_or_ordered style."""
@@ -431,7 +445,7 @@ class TestMD029Fix:
     def test_fix_preserves_indentation(self, rule: MD029) -> None:
         """Fix preserves leading indentation on list items."""
         config = MD029Config(style="one")
-        content = "   2. Indented item\n   3. Another indented item\n"
+        content = "   1. Indented item\n   3. Another indented item\n"
         doc = Document(Path("test.md"), content)
 
         result = rule.fix(doc, config)
@@ -451,16 +465,13 @@ class TestMD029Fix:
         assert result is None
 
     def test_fix_single_item_invalid(self, rule: MD029) -> None:
-        """Fix corrects single-item list with wrong prefix."""
+        """A single item's number is the list's start, so it is reported but not changed."""
         config = MD029Config(style="one_or_ordered")
         content = load_fixture("md029", "single_item_invalid.md")
         doc = Document(Path("test.md"), content)
 
-        result = rule.fix(doc, config)
-
-        assert result is not None
-        fixed_doc = Document(Path("test.md"), result)
-        assert rule.check(fixed_doc, config) == []
+        assert rule.fix(doc, config) is None
+        assert len(rule.check(doc, config)) == 1
 
     def test_fix_preserves_space_padding(self, rule: MD029) -> None:
         """Fix keeps right-aligned prefixes aligned."""
@@ -534,14 +545,15 @@ class TestMD029Fix:
         assert result.endswith("- 1. First\n  2. Second\n  3. Fourth\n")
         assert rule.fix(Document(Path("test.md"), result), config) is None
 
-    def test_fix_renumbers_both_items_on_one_line(self, rule: MD029) -> None:
-        """Fix renumbers a parent and a child item that share a line."""
+    def test_fix_renumbers_parent_on_nested_list_line(self, rule: MD029) -> None:
+        """Fix renumbers a parent item whose line also starts a nested list, keeping its start."""
         config = MD029Config(style="one")
-        doc = Document(Path("test.md"), "10. 3. a\n9. b\n")
+        content = load_fixture("md029", "nested_on_one_line.md")
+        doc = Document(Path("test.md"), content)
 
         result = rule.fix(doc, config)
 
-        assert result == "1. 1. a\n1. b\n"
+        assert result == content.replace("9. 3. b", "1. 3. b")
 
     def test_fixable_property(self, rule: MD029) -> None:
         """Rule reports as fixable."""
