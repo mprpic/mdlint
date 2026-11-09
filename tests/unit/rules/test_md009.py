@@ -352,3 +352,14 @@ class TestMD009Fix:
     def test_fixable_property(self, rule: MD009) -> None:
         """Rule reports as fixable."""
         assert rule.fixable is True
+
+    def test_fix_keeps_hard_line_break(self, rule: MD009, config: MD009Config) -> None:
+        """Extra spaces that form a hard break are trimmed to br_spaces, keeping the break."""
+        content = load_fixture("md009", "hard_break_extra_spaces.md")
+        doc = Document(Path("test.md"), content)
+
+        result = rule.fix(doc, config)
+
+        assert result == "# Hard Breaks\n\nLine one  \nline two\n\nEnd of a paragraph\n"
+        assert Document.render_html(result) == Document.render_html(content)
+        assert rule.check(Document(Path("test.md"), result), config) == []

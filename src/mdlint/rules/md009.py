@@ -123,14 +123,37 @@ class MD009(Rule[MD009Config]):
 
         return violations
 
+    @staticmethod
+    def _hard_break_lines(document: Document) -> set[int]:
+        """1-indexed lines whose trailing spaces would render a hard line break.
+
+        That is every line of a paragraph but its last, unless the spaces are inside a code
+        span that continues on the next line.
+        """
+        lines: set[int] = set()
+        for token in document.tokens:
+            if token.type == "inline" and token.map:
+                for line_num in range(token.map[0] + 1, token.map[1]):
+                    line = document.get_line(line_num) or ""
+                    end = len(line.rstrip()) + 1
+                    if end not in document.code_span_positions.get(line_num, set()):
+                        lines.add(line_num)
+        return lines
+
     def fix(self, document: Document, config: MD009Config) -> str | None:
-        """Fix trailing spaces by removing them."""
+        """Fix trailing spaces by removing them.
+
+        Two or more trailing spaces after text render as a hard line break, so there the
+        whitespace is trimmed to exactly `br_spaces` spaces instead, keeping the break.
+        """
         violating_lines = self._get_violating_lines(document, config)
         if not violating_lines:
             return None
 
+        break_lines = self._hard_break_lines(document) if config.br_spaces >= 2 else set()
         lines = document.content.split("\n")
         for line_num, stripped, _ in violating_lines:
-            lines[line_num - 1] = stripped
+            hard_break = line_num in break_lines and lines[line_num - 1].endswith("  ")
+            lines[line_num - 1] = stripped + " " * config.br_spaces if hard_break else stripped
 
         return "\n".join(lines)
