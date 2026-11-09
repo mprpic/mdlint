@@ -456,7 +456,7 @@ class TestCLICheckWithConfig:
         (tmp_path / "keep.md").write_text("# Keep\n")
 
         config = tmp_path / ".mdlint.toml"
-        config.write_text(f'exclude = ["{subdir}"]\n')
+        config.write_text(f"exclude = ['{subdir}']\n")
 
         result = runner.invoke(cli, ["check", "--config", str(config), str(tmp_path)])
 
@@ -475,7 +475,7 @@ class TestCLICheckWithConfig:
 
         # Config excludes the directory, CLI --exclude replaces with glob pattern
         config = tmp_path / ".mdlint.toml"
-        config.write_text(f'exclude = ["{subdir}"]\n')
+        config.write_text(f"exclude = ['{subdir}']\n")
 
         result = runner.invoke(
             cli, ["check", "--config", str(config), "--exclude", "*.tmp.md", str(tmp_path)]
@@ -498,7 +498,7 @@ class TestCLICheckWithConfig:
 
         # Config excludes the directory
         config = tmp_path / ".mdlint.toml"
-        config.write_text(f'exclude = ["{subdir}"]\n')
+        config.write_text(f"exclude = ['{subdir}']\n")
 
         # --extend-exclude adds glob pattern on top
         result = runner.invoke(
@@ -821,7 +821,9 @@ class TestCLIOutputWidth:
 
         result = runner.invoke(cli, args)
 
-        assert max(len(line) for line in result.output.splitlines()) == expected_width
+        widest = max(len(line) for line in result.output.splitlines())
+        # Rich draws one column narrower on legacy Windows consoles, to avoid their auto-wrap
+        assert expected_width - 1 <= widest <= expected_width
 
     def test_check_results_never_wrapped(self, tmp_path) -> None:
         """Each result stays on one line, so long paths survive narrow terminals and pipes."""

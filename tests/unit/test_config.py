@@ -51,7 +51,8 @@ class TestFindConfigFile:
             result = find_config_file(subdir)
 
             assert result is not None
-            assert result == config_file
+            # Windows may spell the temp directory in its short 8.3 form on one side
+            assert result.resolve() == config_file.resolve()
 
     def test_returns_none_when_no_config_exists(self) -> None:
         """Return None when no config file exists in hierarchy."""
