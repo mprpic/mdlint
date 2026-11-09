@@ -1,17 +1,12 @@
 import dataclasses
 import json
 import re
-import sys
+import tomllib
 import types
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib  # type: ignore[import-not-found]
 
 from mdlint.rules import RULE_REGISTRY, resolve_rule_id
 from mdlint.rules.base import RuleConfig

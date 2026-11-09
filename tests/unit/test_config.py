@@ -1,5 +1,6 @@
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -145,13 +146,6 @@ class TestParseInlineConfig:
 
     def test_invalid_toml_raises_error(self) -> None:
         """Invalid TOML raises TOMLDecodeError."""
-        import sys
-
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            import tomli as tomllib  # type: ignore[import-not-found]
-
         with pytest.raises(tomllib.TOMLDecodeError):
             parse_inline_config("invalid = [unclosed")
 

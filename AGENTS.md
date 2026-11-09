@@ -152,7 +152,7 @@ included whatever their extension, unless they match an `exclude` pattern.
 
 ## Code Style
 
-- Python 3.10+ with type hints
+- Python 3.11+ with type hints
 - Ruff for linting and formatting (see `.ruff.toml` for configuration); `tests/fixtures/` is excluded because the
   fixtures deliberately contain malformed whitespace that ruff would normalize
 - `tests/conftest.py` sets `COLUMNS=80` for every test, so Rich output does not depend on the terminal running the

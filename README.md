@@ -30,7 +30,7 @@ pip install --user mdlint
 uvx mdlint -h
 ```
 
-Requires Python 3.10 or later.
+Requires Python 3.11 or later.
 
 ## Usage
 

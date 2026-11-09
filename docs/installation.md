@@ -5,7 +5,7 @@ hide:
 
 # Installation
 
-`mdlint` requires Python 3.10 or later.
+`mdlint` requires Python 3.11 or later.
 
 <!-- mdlint: disable MD046 -->
 === "uv"
