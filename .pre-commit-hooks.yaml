@@ -3,4 +3,5 @@
   description: Lint Markdown files for style violations
   entry: mdlint check
   language: python
-  types: [markdown]
+  # The extensions mdlint itself looks for in directories (MARKDOWN_EXTENSIONS)
+  files: (?i)\.(md|markdown|mdown|mkd|mkdn)$
