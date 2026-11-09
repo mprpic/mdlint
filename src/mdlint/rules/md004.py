@@ -36,6 +36,7 @@ class MD004(Rule[MD004Config]):
     name = "ul-style"
     summary = "Unordered list style should be consistent"
     config_class = MD004Config
+    preserves_rendering = True
 
     description = (
         "This rule ensures that unordered list markers throughout a document "

@@ -33,6 +33,7 @@ class MD050(Rule[MD050Config]):
     name = "strong-style"
     summary = "Strong style should be consistent"
     config_class = MD050Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when the symbols used in the document for "

@@ -49,6 +49,7 @@ class MD029(Rule[MD029Config]):
     name = "ol-prefix"
     summary = "Ordered list item prefix should be consistent"
     config_class = MD029Config
+    preserves_rendering = True
 
     description = (
         "This rule ensures that ordered list item prefixes follow a consistent "

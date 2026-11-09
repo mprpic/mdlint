@@ -39,6 +39,7 @@ class MD003(Rule[MD003Config]):
     name = "heading-style"
     summary = "Heading style should be consistent"
     config_class = MD003Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces consistent heading styles throughout a document. "

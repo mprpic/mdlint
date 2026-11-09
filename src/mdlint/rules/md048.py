@@ -33,6 +33,7 @@ class MD048(Rule[MD048Config]):
     name = "code-fence-style"
     summary = "Code fence style should be consistent"
     config_class = MD048Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces that fenced code blocks use a consistent style "

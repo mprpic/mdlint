@@ -147,6 +147,8 @@ Not all rules support auto-fixing. When `--fix` is used:
   another; passes continue while they reduce the number of fixable violations, up to 10
 - A rule with a violation suppressed by an [inline directive](#inline-suppression) is not applied to that file, so
   the suppressed lines are left untouched and the rule's other violations there are still reported
+- Fixes that only change formatting, such as list indentation or heading style, are discarded for a file if they
+  would change how the document renders; those violations are still reported for you to fix by hand
 - Files are modified in-place with the corrected content, keeping their line endings (LF or CRLF) and any byte order
   mark
 - Any remaining unfixable violations are still reported in the output

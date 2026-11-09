@@ -17,6 +17,7 @@ class MD032(Rule[MD032Config]):
     name = "blanks-around-lists"
     summary = "Lists should be surrounded by blank lines"
     config_class = MD032Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces blank lines around lists. It triggers when "

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from mdlint.config import build_rule_configs
 from mdlint.document import Document
 from mdlint.linter import MAX_FIX_PASSES, FileResult, Linter, LintResult
 from mdlint.rules import RULE_REGISTRY
@@ -257,6 +258,40 @@ class TestFixSuppression:
 
         assert fixed == content
         assert [v.line for v in result.violations] == remaining
+
+
+class TestFixPreservesRendering:
+    """Formatting fixes that would change the rendered document are discarded."""
+
+    @pytest.mark.parametrize(
+        ("rule_id", "options", "fixture"),
+        [
+            ("MD007", {}, "rendering_list_paragraph.md"),  # would pull the paragraph in
+            ("MD007", {}, "rendering_lazy_line.md"),  # would make a lazy line a list
+            ("MD027", {}, "rendering_quote_tab.md"),  # would move a tab-indented paragraph
+            ("MD046", {"style": "fenced"}, "rendering_code_tab.md"),  # code would leave the list
+            ("MD003", {"style": "atx"}, "rendering_setext_hash.md"),  # "#" would close the ATX
+            ("MD029", {"style": "ordered"}, "rendering_wide_numbers.md"),  # "10." needs 4 spaces
+        ],
+    )
+    def test_fix_changing_rendering_is_discarded(
+        self, rule_id: str, options: dict, fixture: str
+    ) -> None:
+        configs = build_rule_configs({"rules": {rule_id: options}})
+        linter = Linter(rule_configs=configs, enabled_rules={rule_id})
+        content = load_fixture("linter", fixture)
+        assert RULE_REGISTRY[rule_id]().fix(Document(Path("t.md"), content), configs[rule_id])
+
+        result, fixed = linter.fix_stdin(content)
+
+        assert fixed == content
+        assert result.violations
+
+    def test_rule_meant_to_change_rendering_still_fixes(self) -> None:
+        """MD034 turns a bare URL into a link, which is a rendering change it is meant to make."""
+        result, fixed = Linter(enabled_rules={"MD034"}).fix_stdin("Visit https://example.com\n")
+
+        assert fixed == "Visit <https://example.com>\n"
 
 
 def _char_violations(rule: Rule, document: Document, char: str) -> list[Violation]:

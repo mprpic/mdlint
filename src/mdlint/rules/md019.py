@@ -18,6 +18,7 @@ class MD019(Rule[MD019Config]):
     name = "no-multiple-space-atx"
     summary = "Multiple spaces after hash on ATX style heading"
     config_class = MD019Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when more than one space is used to separate "

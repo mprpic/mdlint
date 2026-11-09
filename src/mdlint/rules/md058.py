@@ -17,6 +17,7 @@ class MD058(Rule[MD058Config]):
     name = "blanks-around-tables"
     summary = "Tables should be surrounded by blank lines"
     config_class = MD058Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces blank lines around tables. It triggers when "

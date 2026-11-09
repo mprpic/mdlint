@@ -44,6 +44,7 @@ class MD007(Rule[MD007Config]):
     name = "ul-indent"
     summary = "Unordered list indentation"
     config_class = MD007Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces consistent indentation for nested unordered list "

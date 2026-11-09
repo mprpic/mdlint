@@ -32,6 +32,7 @@ class MD010(Rule[MD010Config]):
     name = "no-hard-tabs"
     summary = "No hard tabs"
     config_class = MD010Config
+    preserves_rendering = True
 
     description = (
         "This rule detects hard tab characters in Markdown files. It "

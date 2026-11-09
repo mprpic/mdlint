@@ -122,6 +122,7 @@ class MD049(Rule[MD049Config]):
     name = "emphasis-style"
     summary = "Emphasis style should be consistent"
     config_class = MD049Config
+    preserves_rendering = True
 
     description = (
         "This rule ensures that emphasis markers (for italic text) throughout "

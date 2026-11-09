@@ -38,6 +38,17 @@ def _split_encoding(text: str) -> tuple[str, str, str]:
     return bom, newline, _LINE_ENDING.sub("\n", text[len(bom) :])
 
 
+def _rendering(content: str) -> str:
+    """The HTML a document renders to, ignoring whitespace a browser would collapse.
+
+    Formatting fixes may change whitespace (tabs to spaces, blank lines, indentation) but
+    must keep every element, so runs of whitespace and whitespace around tags are dropped
+    before comparing.
+    """
+    html = re.sub(r"\s+", " ", Document.render_html(content))
+    return re.sub(r" ?(<[^>]+>) ?", r"\1", html)
+
+
 @dataclass
 class FileResult:
     """Aggregates violations for a single file.
@@ -374,9 +385,12 @@ class Linter:
                 continue
 
             fixed = rule.fix(document, config)
-            if fixed is not None and fixed != document.content:
-                document = Document(document.path, fixed)
-                cached_violations.clear()
+            if fixed is None or fixed == document.content:
+                continue
+            if rule.preserves_rendering and _rendering(fixed) != _rendering(document.content):
+                continue  # the fix would change what the document shows, not just its style
+            document = Document(document.path, fixed)
+            cached_violations.clear()
 
         return document
 

@@ -18,6 +18,7 @@ class MD027(Rule[MD027Config]):
     name = "no-multiple-space-blockquote"
     summary = "Multiple spaces after blockquote symbol"
     config_class = MD027Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when blockquote lines contain more than one "

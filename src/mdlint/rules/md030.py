@@ -92,6 +92,7 @@ class MD030(Rule[MD030Config]):
     name = "list-marker-space"
     summary = "Spaces after list markers"
     config_class = MD030Config
+    preserves_rendering = True
 
     description = (
         "This rule checks the number of spaces between list markers "

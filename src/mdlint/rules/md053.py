@@ -30,6 +30,7 @@ class MD053(Rule[MD053Config]):
     name = "link-image-reference-definitions"
     summary = "Link and image reference definitions should be needed"
     config_class = MD053Config
+    preserves_rendering = True
 
     description = (
         "This rule checks for link and image reference definitions that are "

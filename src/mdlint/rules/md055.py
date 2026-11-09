@@ -40,6 +40,7 @@ class MD055(Rule[MD055Config]):
     name = "table-pipe-style"
     summary = "Table pipe style should be consistent"
     config_class = MD055Config
+    preserves_rendering = True
 
     description = (
         "This rule ensures that table rows use a consistent style for leading "

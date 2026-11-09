@@ -42,6 +42,7 @@ class MD009(Rule[MD009Config]):
     name = "no-trailing-spaces"
     summary = "No trailing spaces"
     config_class = MD009Config
+    preserves_rendering = True
 
     description = (
         "This rule detects trailing whitespace at the end of lines. It "

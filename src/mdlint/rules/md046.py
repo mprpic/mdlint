@@ -41,6 +41,7 @@ class MD046(Rule[MD046Config]):
     name = "code-block-style"
     summary = "Code block style should be consistent"
     config_class = MD046Config
+    preserves_rendering = True
 
     description = (
         "This rule ensures that code blocks throughout a document follow a "

@@ -29,6 +29,7 @@ class MD035(Rule[MD035Config]):
     name = "hr-style"
     summary = "Horizontal rule style should be consistent"
     config_class = MD035Config
+    preserves_rendering = True
 
     SETEXT_UNDERLINE_RE = re.compile(r"-+[ \t]*")
 

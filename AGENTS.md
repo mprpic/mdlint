@@ -182,7 +182,8 @@ above.
 
 1. Create `src/mdlint/rules/mdXXX.py`
 2. Define config class if needed (extend `RuleConfig`)
-3. Implement rule class extending `Rule`
+3. Implement rule class extending `Rule`; if its fix only changes how the Markdown is written (indentation, markers,
+   blank lines), set `preserves_rendering = True` so the fix engine discards fixes that change the rendered HTML
 4. Import and add the rule to `RULE_REGISTRY` in `rules/__init__.py`
 5. Add tests in `tests/unit/rules/test_mdXXX.py`
 6. Add fixtures: at least one `valid.md` and one `invalid.md` file that shows good and bad examples

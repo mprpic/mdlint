@@ -18,6 +18,7 @@ class MD023(Rule[MD023Config]):
     name = "heading-start-left"
     summary = "Headings must start at the beginning of the line"
     config_class = MD023Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when a heading is preceded by one or more "

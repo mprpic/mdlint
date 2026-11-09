@@ -36,6 +36,7 @@ class MD022(Rule[MD022Config]):
     name = "blanks-around-headings"
     summary = "Headings should be surrounded by blank lines"
     config_class = MD022Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces blank lines around headings. It triggers when "

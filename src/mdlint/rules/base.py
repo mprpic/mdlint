@@ -24,6 +24,10 @@ class Rule(ABC, Generic[ConfigT]):
     summary: str  # Short one-line description
     config_class: type[RuleConfig] = RuleConfig
 
+    # Whether fix() only changes how the Markdown is written, not what it renders. The fix
+    # engine discards such a fix if the rendered HTML changes, leaving the violation reported.
+    preserves_rendering: bool = False
+
     # Extended documentation
     description: str | None = None  # Detailed explanation of what the rule checks
     rationale: str | None = None  # Why this rule matters

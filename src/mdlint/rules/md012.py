@@ -27,6 +27,7 @@ class MD012(Rule[MD012Config]):
     name = "no-multiple-blanks"
     summary = "No multiple consecutive blank lines"
     config_class = MD012Config
+    preserves_rendering = True
 
     description = (
         "This rule detects multiple consecutive blank lines in markdown "

@@ -17,6 +17,7 @@ class MD047(Rule[MD047Config]):
     name = "single-trailing-newline"
     summary = "Files should end with a single newline character"
     config_class = MD047Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when there is no newline character at the "

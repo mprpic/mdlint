@@ -45,6 +45,7 @@ class MD060(Rule[MD060Config]):
     name = "table-column-style"
     summary = "Table column style should be consistent"
     config_class = MD060Config
+    preserves_rendering = True
 
     # Message constants
     MSG_ALIGNED = 'Table pipe does not align with header for style "aligned"'

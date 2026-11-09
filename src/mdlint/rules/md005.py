@@ -222,6 +222,7 @@ class MD005(Rule[MD005Config]):
     name = "list-indent"
     summary = "List item indentation should be consistent"
     config_class = MD005Config
+    preserves_rendering = True
 
     description = (
         "This rule detects when list items within the same list have "

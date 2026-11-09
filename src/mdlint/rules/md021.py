@@ -18,6 +18,7 @@ class MD021(Rule[MD021Config]):
     name = "no-multiple-space-closed-atx"
     summary = "Multiple spaces inside hashes on closed ATX style heading"
     config_class = MD021Config
+    preserves_rendering = True
 
     description = (
         "This rule is triggered when more than one space is used to separate "

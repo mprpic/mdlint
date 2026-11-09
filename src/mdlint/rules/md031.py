@@ -24,6 +24,7 @@ class MD031(Rule[MD031Config]):
     name = "blanks-around-fences"
     summary = "Fenced code blocks should be surrounded by blank lines"
     config_class = MD031Config
+    preserves_rendering = True
 
     description = (
         "This rule enforces blank lines around fenced code blocks. It triggers "
